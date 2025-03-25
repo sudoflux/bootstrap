@@ -10,6 +10,7 @@ A powerful bootstrap system to set up new machines with your preferred configura
 - 🔌 Configures SSH server
 - 🌐 Provides UDM configuration information
 - 🔄 Keeps SSH hosts in sync across all your machines
+- 🛡️ Maintains security by never sharing private keys
 
 ## 📋 Usage
 
@@ -37,6 +38,7 @@ This will:
 - 📝 Add it to a central SSH hosts configuration
 - 🔄 Sync the configuration with all your other machines
 - 🔑 Allow you to SSH between machines using just the hostname (e.g., `ssh ubuntu-dev`)
+- 🛡️ Maintain proper security by never sharing private keys
 
 ### 🕒 Automatic Host Synchronization
 
@@ -83,9 +85,20 @@ hosts_manager.sh [options]
 - **🔄 Consistency**: Same configuration across all your machines
 - **✨ Convenience**: Simplified SSH between all your systems
 - **🔌 Integration**: Built-in support for UDM/UDM Pro/UDM SE configurations
-- **🛡️ Security**: No SSH keys stored in repositories, only connection information
+- **🛡️ Security**: Stores host configurations in the secure `ssh_hosts` directory, completely separate from your private keys
 - **📊 Scalability**: Works great with 2 machines or 20+ machines
 - **🔁 Idempotent**: Safe to run multiple times
+- **🧰 Adaptable**: Works on Linux, macOS, and even in special environments like Proxmox
+
+## 🔒 Security Details
+
+The SSH Hosts Manager is carefully designed with security in mind:
+
+- ✅ Private SSH keys are **never** shared or stored in the repository
+- ✅ Only connection information (hostnames, IP addresses, usernames) is synchronized
+- ✅ Host configurations are stored in a dedicated `ssh_hosts` directory, not in `.ssh`
+- ✅ Automatically manages `.gitignore` to protect sensitive files 
+- ✅ Sets proper file permissions (600) on SSH configuration files
 
 ## 📝 License
 
