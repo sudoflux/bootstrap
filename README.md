@@ -71,17 +71,24 @@ The `hosts_manager.sh` script allows you to manage SSH hosts across your machine
 After running the bootstrap script, you can manage hosts in two ways:
 
 1. **Direct curl usage (recommended):**
+
+Register and update hosts:
 ```bash
-# Register and update hosts
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
+```
 
-# Distribute SSH keys to all hosts
+Distribute SSH keys to all hosts:
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
+```
 
-# Set up automatic sync
+Set up automatic sync:
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
+```
 
-# Common use case: Distribute keys and set up auto-sync in one command
+Common use case: Distribute keys and set up auto-sync in one command:
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys --auto-sync
 ```
 
@@ -110,8 +117,8 @@ You don't need to run bootstrap again - just this one command will handle the ke
 
 For new machines, the most common workflow is to distribute SSH keys for passwordless access and enable automatic daily syncing:
 
+All-in-one setup: distribute SSH keys and enable daily automatic syncing:
 ```bash
-# All-in-one setup: distribute SSH keys and enable daily automatic syncing
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys --auto-sync
 ```
 
@@ -159,11 +166,13 @@ The hosts_manager.sh script manages host configurations (IP addresses, usernames
 
 For manual key distribution (if automatic fails):
 
+Using ssh-copy-id (recommended):
 ```bash
-# Using ssh-copy-id (recommended)
 ssh-copy-id -i ~/.ssh/id_ed25519.pub hostname
+```
 
-# Alternative manual method
+Alternative manual method:
+```bash
 cat ~/.ssh/id_ed25519.pub | ssh hostname "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
 
