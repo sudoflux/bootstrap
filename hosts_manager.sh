@@ -14,6 +14,7 @@ CRON_SETUP=false
 CRON_UNINSTALL=false
 FORCE_SSH_CONFIG=false
 SKIP_PULL_PHASE=false
+DISTRIBUTE_KEYS=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -63,6 +64,10 @@ parse_args() {
                 CRON_UNINSTALL=true
                 shift
                 ;;
+            --distribute-keys)
+                DISTRIBUTE_KEYS=true
+                shift
+                ;;
             -h|--help)
                 echo "Usage: $0 [options]"
                 echo ""
@@ -74,6 +79,7 @@ parse_args() {
                 echo "  --skip-pull-phase   Skip the initial pull-only phase (not recommended)"
                 echo "  --setup-cron        Set up cron job only (no other actions)"
                 echo "  --remove-cron       Remove the auto-sync cron job"
+                echo "  --distribute-keys   Copy SSH public key to all registered hosts"
                 echo "  -h, --help          Show help message"
                 exit 0
                 ;;
@@ -563,6 +569,91 @@ two_phase_sync() {
     log_step "Phase 2: Register host and push changes"
 }
 
+# Distribute SSH keys to all registered hosts
+distribute_ssh_keys() {
+    log_step "Distributing SSH keys to registered hosts"
+    
+    # Check if we have an SSH key to distribute
+    if [ ! -f "$HOME/.ssh/id_ed25519.pub" ]; then
+        log_error "No SSH public key found at $HOME/.ssh/id_ed25519.pub"
+        log_info "Please run bootstrap.sh first to generate SSH keys"
+        return 1
+    fi
+    
+    # Read the hosts file to get all registered hosts
+    local success_count=0
+    local failed_hosts=()
+    local total_hosts=0
+    
+    # Process each host configuration file
+    for host_file in "$HOSTS_DIR"/*.conf; do
+        if [ ! -f "$host_file" ]; then
+            continue
+        fi
+        
+        # Extract hostname and username from the config file
+        local hostname=$(grep "^Host " "$host_file" | head -n1 | awk '{print $2}')
+        local username=$(grep "User " "$host_file" | head -n1 | awk '{print $2}')
+        local ip=$(grep "HostName " "$host_file" | head -n1 | awk '{print $2}')
+        
+        # Skip if this is the current host
+        if [ "$hostname" = "$(hostname)" ] || [ "$hostname" = "$SANITIZED_HOSTNAME" ]; then
+            log_debug "Skipping current host: $hostname"
+            continue
+        fi
+        
+        ((total_hosts++))
+        log_info "Copying SSH key to $username@$hostname ($ip)..."
+        
+        # Try to copy the key using ssh-copy-id
+        if command -v ssh-copy-id >/dev/null 2>&1; then
+            if ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip" >/dev/null 2>&1; then
+                ((success_count++))
+                log_info "Successfully copied key to $hostname"
+            else
+                failed_hosts+=("$hostname")
+                log_warn "Failed to copy key to $hostname using ssh-copy-id"
+                
+                # Try alternative method if ssh-copy-id fails
+                log_info "Trying alternative method for $hostname..."
+                if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" >/dev/null 2>&1; then
+                    ((success_count++))
+                    # Remove from failed hosts if alternative method succeeds
+                    failed_hosts=("${failed_hosts[@]/$hostname}")
+                    log_info "Successfully copied key to $hostname using alternative method"
+                else
+                    log_error "Failed to copy key to $hostname using alternative method"
+                fi
+            fi
+        else
+            # If ssh-copy-id is not available, use the alternative method directly
+            if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" >/dev/null 2>&1; then
+                ((success_count++))
+                log_info "Successfully copied key to $hostname"
+            else
+                failed_hosts+=("$hostname")
+                log_error "Failed to copy key to $hostname"
+            fi
+        fi
+    done
+    
+    # Summary
+    log_info "Key distribution complete!"
+    log_info "Successfully copied keys to $success_count out of $total_hosts hosts"
+    
+    if [ ${#failed_hosts[@]} -gt 0 ]; then
+        log_warn "Failed to copy keys to the following hosts:"
+        for host in "${failed_hosts[@]}"; do
+            log_warn "  - $host"
+        done
+        log_info "For failed hosts, you can manually copy your key using:"
+        log_info "  ssh-copy-id -i ~/.ssh/id_ed25519.pub username@hostname"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Main function
 main() {
     # Parse command line arguments
@@ -589,6 +680,12 @@ main() {
     
     check_prereqs
     migrate_from_old_path
+    
+    # Handle key distribution if requested
+    if [ "$DISTRIBUTE_KEYS" = true ]; then
+        distribute_ssh_keys
+        exit $?
+    fi
     
     # Run two-phase sync to prevent conflicts (unless in update-only mode)
     if [ "$UPDATE_ONLY" != true ]; then
