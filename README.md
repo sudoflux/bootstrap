@@ -64,6 +64,7 @@ The `hosts_manager.sh` script allows you to manage SSH hosts across your machine
 - **⚙️ SSH Configuration**: Updates your SSH config for seamless connectivity
 - **🔄 Two-Phase Sync**: Automatic conflict prevention with pull-before-push strategy
 - **⏱️ Auto-sync**: Optional cron job setup for daily updates
+- **🔑 Key Distribution**: Automatically distribute SSH keys to all registered hosts
 
 ### Usage
 
@@ -89,6 +90,7 @@ Or if you've already run bootstrap:
 | `--setup-cron` | Set up cron job only (no other actions) |
 | `--remove-cron` | Remove the auto-sync cron job |
 | `--skip-pull-phase` | Skip the initial pull-only phase (not recommended) |
+| `--distribute-keys` | Copy SSH public key to all registered hosts |
 
 ### Best Practices for Multiple Machines
 
@@ -103,21 +105,45 @@ This happens automatically with a single command:
 ~/dotfiles/hosts_manager.sh
 ```
 
+### SSH Key Distribution
+
+The hosts manager now includes automatic SSH key distribution to make setting up passwordless authentication between your machines easier:
+
+```bash
+# Distribute your SSH key to all registered hosts
+~/dotfiles/hosts_manager.sh --distribute-keys
+```
+
+This will:
+1. Check for your SSH public key (`~/.ssh/id_ed25519.pub`)
+2. Attempt to copy it to each registered host
+3. Use multiple methods to ensure successful key distribution:
+   - First tries `ssh-copy-id` if available
+   - Falls back to manual key copying if needed
+4. Provides a detailed report of successful and failed attempts
+5. Offers guidance for manual key copying if any hosts fail
+
 ## 🔒 Security Notes
 
 ### SSH Keys and Passwordless Authentication
 
-The hosts_manager.sh script manages host configurations (IP addresses, usernames, etc.) but **does not** automatically transfer SSH keys between machines for security reasons. To enable passwordless SSH between your machines, you need to manually copy your public keys to each remote server's authorized_keys file:
+The hosts_manager.sh script manages host configurations (IP addresses, usernames, etc.) and now includes automatic key distribution with the `--distribute-keys` option. When using this feature:
+
+1. **Only the public key is distributed**: Your private key remains secure on your local machine
+2. **Multiple authentication methods**: Uses `ssh-copy-id` with fallback to manual methods
+3. **Proper permissions**: Ensures correct SSH directory and key file permissions
+4. **Progress tracking**: Shows which hosts succeeded/failed during distribution
+5. **Manual fallback**: Provides instructions for manual key copying if needed
+
+For manual key distribution (if automatic fails):
 
 ```bash
-# The easiest way (if ssh-copy-id is available)
-ssh-copy-id hostname
+# Using ssh-copy-id (recommended)
+ssh-copy-id -i ~/.ssh/id_ed25519.pub hostname
 
-# Alternative method
+# Alternative manual method
 cat ~/.ssh/id_ed25519.pub | ssh hostname "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
-
-You'll need to do this once from each client machine to each server you want to connect to. After this step, you can SSH between machines without entering passwords.
 
 ## 🔧 Troubleshooting
 
@@ -158,6 +184,31 @@ If your SSH config doesn't include the hosts file:
 ```
 
 This forces an update of your SSH config with the correct Include line.
+
+### Key Distribution Issues
+
+If key distribution fails for some hosts:
+
+1. Check connectivity to the failed hosts:
+   ```bash
+   ssh hostname
+   ```
+
+2. Verify the remote user has proper permissions:
+   ```bash
+   ssh hostname "ls -la ~/.ssh"
+   ```
+
+3. Try manual key distribution:
+   ```bash
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub hostname
+   ```
+
+4. Check SSH agent is running:
+   ```bash
+   eval $(ssh-agent)
+   ssh-add ~/.ssh/id_ed25519
+   ```
 
 ### Network Configuration Issues
 
