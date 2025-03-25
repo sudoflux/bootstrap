@@ -10,6 +10,43 @@
 
 A comprehensive script to bootstrap new Linux, macOS, and WSL environments with my preferred configuration and tools. Sets up everything from system packages to SSH keys to network configuration in one command.
 
+## 🚀 Quick Start (First Time Setup)
+
+### Step 1: Run the Bootstrap Script
+
+This is the first command you should run on a new machine:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)"
+```
+
+This will:
+- Install and update essential system packages
+- Generate SSH keys
+- Clone and set up dotfiles repository
+- Configure SSH server
+- Set up networking
+
+### Step 2: Distribute SSH Keys
+
+After bootstrapping, distribute your SSH key to all other registered hosts to enable passwordless access:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
+```
+
+### Step 3: Set Up Automatic Syncing
+
+Finally, set up a daily cron job to keep your hosts in sync across all machines:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
+```
+
+> **Important**: Steps 2 and 3 must be run as separate commands because the `--distribute-keys` option makes the script exit immediately after key distribution.
+
+That's it! Your new machine is now fully configured and part of your network.
+
 ## ✨ Features
 
 - **🔄 System Updates**: Installs and updates essential system packages
@@ -19,13 +56,7 @@ A comprehensive script to bootstrap new Linux, macOS, and WSL environments with 
 - **🌐 Network**: Configures DNS search domains for seamless local networking
 - **🔗 Host Management**: Easy SSH access between machines with the hosts_manager.sh script
 
-## 📋 Usage
-
-### One-line Setup
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)"
-```
+## 📋 Bootstrap Script Details
 
 ### Options
 
@@ -38,7 +69,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 
 ### DNS Search Domain Configuration
 
-The bootstrap script can now configure your network settings to include a search domain, making it easier to access machines on your local network by hostname without specifying the domain:
+The bootstrap script can configure your network settings to include a search domain, making it easier to access machines on your local network by hostname without specifying the domain:
 
 Set up everything with "lab" as the search domain:
 ```bash
@@ -68,69 +99,42 @@ The `hosts_manager.sh` script allows you to manage SSH hosts across your machine
 - **⏱️ Auto-sync**: Optional cron job setup for daily updates
 - **🔑 Key Distribution**: Automatically distribute SSH keys to all registered hosts
 
-### Usage
+### Detailed Usage
 
-After running the bootstrap script, you can manage hosts in two ways:
+After running the bootstrap script, you have several options for managing hosts:
 
-1. **Direct curl usage (recommended):**
+#### Registering Your Machine
 
-Register and update hosts:
+To register the current machine and update your hosts configuration:
+
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
 ```
 
-Distribute SSH keys to all hosts:
+#### Distributing SSH Keys
+
+To copy your SSH public key to all registered hosts (enabling passwordless login):
+
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
 ```
 
-Set up automatic sync:
+#### Setting Up Automatic Sync
+
+To set up a daily cron job that keeps your hosts file in sync across all machines:
+
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
 ```
 
-2. **If you prefer using the local copy:**
+#### Using Local Copy (Alternative)
+
+If you prefer using the local copy:
 ```bash
 ~/dotfiles/hosts_manager.sh
 ```
 
-### SSH Key Distribution
-
-The easiest way to set up passwordless SSH between your machines is to use the `--distribute-keys` option. After you've bootstrapped a machine (meaning it has SSH keys and is registered in your dotfiles), you can distribute its SSH key to all other registered hosts with a single command:
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
-```
-
-This will:
-1. Use your existing SSH key (created during bootstrap)
-2. Copy it to all other registered hosts
-3. Set up proper permissions on the remote machines
-4. Enable passwordless SSH access from this machine to others
-
-You don't need to run bootstrap again - just this one command will handle the key distribution.
-
-### Quick Setup (Common Workflow)
-
-For new machines, the most common workflow is to distribute SSH keys for passwordless access and enable automatic daily syncing:
-
-Step 1: Distribute SSH keys to all hosts:
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
-```
-
-Step 2: Set up automatic daily syncing:
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
-```
-
-> **Important**: These commands must be run separately because the `--distribute-keys` option makes the script exit immediately after key distribution.
-
-The first command copies your SSH key to all other registered hosts, enabling passwordless login.
-
-The second command sets up a daily cron job that keeps your hosts file in sync across all machines.
-
-### Options
+### Host Manager Options
 
 | Option | Description |
 |--------|-------------|
@@ -141,19 +145,6 @@ The second command sets up a daily cron job that keeps your hosts file in sync a
 | `--remove-cron` | Remove the auto-sync cron job |
 | `--skip-pull-phase` | Skip the initial pull-only phase (not recommended) |
 | `--distribute-keys` | Copy SSH public key to all registered hosts |
-
-### Best Practices for Multiple Machines
-
-The script includes automatic two-phase synchronization to prevent conflicts when managing multiple machines:
-
-1. It will automatically pull the latest changes first
-2. Then register the current host and push changes
-
-This happens automatically with a single command:
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
-```
 
 ## 🔒 Security Notes
 
