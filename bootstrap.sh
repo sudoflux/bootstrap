@@ -44,7 +44,7 @@ install_packages() {
             sudo apt upgrade -y
             
             echo "Installing essential tools..."
-            sudo apt install -y curl git build-essential python3 python3-pip openssh-server avahi-daemon
+            sudo apt install -y curl git build-essential python3 python3-pip openssh-server
         elif [ "$DISTRO" == "fedora" ] || [ "$DISTRO" == "rhel" ] || [ "$DISTRO" == "centos" ]; then
             echo "Updating dnf repositories..."
             sudo dnf check-update
@@ -53,7 +53,7 @@ install_packages() {
             sudo dnf upgrade -y
             
             echo "Installing essential tools..."
-            sudo dnf install -y curl git gcc gcc-c++ make python3 python3-pip openssh-server avahi
+            sudo dnf install -y curl git gcc gcc-c++ make python3 python3-pip openssh-server
         elif [ "$DISTRO" == "arch" ]; then
             echo "Updating pacman repositories..."
             sudo pacman -Sy
@@ -62,7 +62,7 @@ install_packages() {
             sudo pacman -Syu --noconfirm
             
             echo "Installing essential tools..."
-            sudo pacman -S --noconfirm curl git base-devel python python-pip openssh avahi
+            sudo pacman -S --noconfirm curl git base-devel python python-pip openssh
         else
             echo "Unsupported Linux distribution: $DISTRO"
             echo "Please install the following tools manually: curl, git, build-essential, python3, python3-pip, openssh-server"
@@ -198,11 +198,6 @@ setup_ssh_server() {
             sudo systemctl enable ssh
             sudo systemctl start ssh
             
-            # Enable avahi for .local hostname resolution
-            echo "Enabling Avahi daemon for .local hostname resolution..."
-            sudo systemctl enable avahi-daemon
-            sudo systemctl start avahi-daemon
-            
             # Ensure SSH server is running and accepting connections
             echo "Configuring SSH server..."
             if [ -f "/etc/ssh/sshd_config" ]; then
@@ -218,11 +213,6 @@ setup_ssh_server() {
             sudo systemctl enable sshd
             sudo systemctl start sshd
             
-            # Enable avahi for .local hostname resolution
-            echo "Enabling Avahi daemon for .local hostname resolution..."
-            sudo systemctl enable avahi-daemon
-            sudo systemctl start avahi-daemon
-            
             # Ensure SSH server is running and accepting connections
             echo "Configuring SSH server..."
             if [ -f "/etc/ssh/sshd_config" ]; then
@@ -237,11 +227,6 @@ setup_ssh_server() {
             echo "Enabling SSH server..."
             sudo systemctl enable sshd
             sudo systemctl start sshd
-            
-            # Enable avahi for .local hostname resolution
-            echo "Enabling Avahi daemon for .local hostname resolution..."
-            sudo systemctl enable avahi-daemon
-            sudo systemctl start avahi-daemon
             
             # Ensure SSH server is running and accepting connections
             echo "Configuring SSH server..."
@@ -265,70 +250,93 @@ setup_ssh_server() {
         echo "Set-Service -Name sshd -StartupType 'Automatic'"
     fi
 
+    # Get IP addresses for the machine
+    # This supports multiple network interfaces and different OS types
+    declare -a IP_ADDRESSES
+    
+    if [ "$OS_TYPE" == "linux" ]; then
+        # Get IP addresses from Linux
+        if command -v ip &> /dev/null; then
+            # Modern Linux with ip command
+            readarray -t IP_ADDRESSES < <(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
+        elif command -v ifconfig &> /dev/null; then
+            # Older Linux with ifconfig
+            readarray -t IP_ADDRESSES < <(ifconfig | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
+        fi
+    elif [ "$OS_TYPE" == "macos" ]; then
+        # Get IP addresses from macOS
+        readarray -t IP_ADDRESSES < <(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}')
+    elif [ "$OS_TYPE" == "windows" ]; then
+        # Get IP addresses from Windows/Git Bash
+        readarray -t IP_ADDRESSES < <(ipconfig | grep -i "IPv4 Address" | grep -oP '(?<=:\s)\d+(\.\d+){3}')
+    fi
+    
     # Add system host entry to SSH config for easy connection
     SSH_CONFIG="$HOME/.ssh/config"
-    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
     
-    # Get fully qualified hostname if available
-    FQDN=$(hostname -f 2>/dev/null || echo "$HOSTNAME")
-    
-    # Different ways to connect to this machine
+    # Create host entries for this machine
     if ! grep -q "Host $SANITIZED_HOSTNAME" "$SSH_CONFIG"; then
         echo "Adding this machine to your SSH config for easy access..."
         
         cat <<EOF >> "$SSH_CONFIG"
 # This machine ($HOSTNAME)
 Host $SANITIZED_HOSTNAME
-    HostName $SANITIZED_HOSTNAME.local
+    HostName $SANITIZED_HOSTNAME
     User $USER
     AddKeysToAgent yes
     IdentityFile ~/.ssh/id_ed25519
 
 EOF
         
-        # If we have an IP address, add it as an alternative
-        if [ -n "$LOCAL_IP" ]; then
-            cat <<EOF >> "$SSH_CONFIG"
-# This machine via IP address
-Host ${SANITIZED_HOSTNAME}-ip
-    HostName $LOCAL_IP
+        # Add each IP address as a separate entry
+        if [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
+            local i=1
+            for IP in "${IP_ADDRESSES[@]}"; do
+                cat <<EOF >> "$SSH_CONFIG"
+# This machine via IP address $i
+Host ${SANITIZED_HOSTNAME}-ip${i}
+    HostName $IP
     User $USER
     AddKeysToAgent yes
     IdentityFile ~/.ssh/id_ed25519
 
 EOF
-        fi
-        
-        # If FQDN is different from hostname, add it too
-        if [ "$FQDN" != "$HOSTNAME" ]; then
-            cat <<EOF >> "$SSH_CONFIG"
-# This machine via FQDN
-Host ${SANITIZED_HOSTNAME}-fqdn
-    HostName $FQDN
-    User $USER
-    AddKeysToAgent yes
-    IdentityFile ~/.ssh/id_ed25519
-
-EOF
+                i=$((i+1))
+            done
         fi
     fi
 
     echo "SSH server setup completed."
     echo ""
-    echo "To connect to this machine from another system:"
-    echo "1. Copy your public key to this machine with:"
-    echo "   ssh-copy-id $USER@$SANITIZED_HOSTNAME.local"
+    echo "To connect to this machine using your Ubiquiti UDM SE for DNS resolution:"
     echo ""
-    echo "2. Then connect using simple hostname:"
-    echo "   ssh $SANITIZED_HOSTNAME"
+    
+    # Display hostname and IP information
+    echo "Machine information for UDM configuration:"
+    echo "- Hostname: $HOSTNAME"
+    echo "- Username: $USER"
+    
+    # Display all IP addresses
+    if [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
+        echo "- IP addresses:"
+        local i=1
+        for IP in "${IP_ADDRESSES[@]}"; do
+            echo "  $i. $IP"
+            i=$((i+1))
+        done
+        
+        echo ""
+        echo "Add this machine to your UDM with:"
+        echo "  Hostname: $SANITIZED_HOSTNAME"
+        echo "  IP: ${IP_ADDRESSES[0]}"
+    else
+        echo "- IP address: Could not determine"
+    fi
+    
     echo ""
-    echo "Alternate connection methods:"
-    if [ -n "$LOCAL_IP" ]; then
-        echo "   ssh ${SANITIZED_HOSTNAME}-ip    # Connect via IP ($LOCAL_IP)"
-    fi
-    if [ "$FQDN" != "$HOSTNAME" ]; then
-        echo "   ssh ${SANITIZED_HOSTNAME}-fqdn  # Connect via FQDN ($FQDN)"
-    fi
+    echo "After adding to UDM, connect using:"
+    echo "  ssh $SANITIZED_HOSTNAME"
+    echo ""
 }
 
 # Main execution
@@ -346,8 +354,11 @@ echo "- SSH server for incoming connections"
 echo ""
 echo "Remember to add your GitHub SSH key to your GitHub account!"
 echo ""
-echo "System information:"
+echo "System information for UDM configuration:"
 echo "- Hostname: $(hostname)"
 echo "- User: $USER"
-echo "- IP address: $(hostname -I 2>/dev/null | awk '{print $1}' || echo "Not available")"
-echo "- OS: $OS_TYPE $([ "$OS_TYPE" == "linux" ] && echo "($DISTRO)" || echo "")"
+if [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
+    echo "- Primary IP: ${IP_ADDRESSES[0]}"
+else
+    echo "- IP address: Use 'ip addr' or 'ifconfig' to find"
+fi
