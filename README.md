@@ -11,9 +11,12 @@ A cross-platform system bootstrap script that automatically sets up a new system
   - build-essential (or equivalent)
   - python3
   - python3-pip
+  - openssh-server (for remote access)
+  - avahi-daemon (for .local hostname resolution)
 - Clones your dotfiles repository
 - Sets up SSH keys for GitHub and general use
-- Configures SSH with appropriate settings
+- Configures SSH server for remote access
+- Adds machine hostname to SSH config for easy connections
 
 ## Supported Operating Systems
 
@@ -54,6 +57,11 @@ chmod +x bootstrap.sh
    - Creates GitHub SSH key (if it doesn't exist)
    - Creates general SSH key (if it doesn't exist)
    - Configures SSH settings for security and convenience
+5. **SSH Server Configuration**:
+   - Installs and enables SSH server
+   - Configures system for incoming SSH connections
+   - Adds the machine's hostname to SSH config for easy access
+   - Enables Avahi daemon for .local hostname resolution (Linux)
 
 ## SSH Key Management
 
@@ -64,11 +72,40 @@ The script generates two SSH keys:
 
 After running the script, remember to add the GitHub SSH key to your GitHub account at: https://github.com/settings/keys
 
+## Remote Access Configuration
+
+The bootstrap script automatically configures the system for SSH access by:
+
+1. Installing and enabling the SSH server
+2. Setting up proper SSH server configuration
+3. Adding entries to your SSH config file for easy connection:
+   - `hostname` - Connect via mDNS/Avahi (.local domain)
+   - `hostname-ip` - Connect via IP address
+   - `hostname-fqdn` - Connect via fully qualified domain name (if available)
+
+### Connecting to Your Machine
+
+From another system, you can:
+
+1. Copy your SSH key to this machine (first-time setup):
+   ```bash
+   ssh-copy-id user@hostname.local
+   ```
+
+2. Then simply connect using:
+   ```bash
+   ssh hostname
+   ```
+
+The script automatically creates shortcut entries in your SSH config based on the system's hostname.
+
 ## Security Considerations
 
 - All SSH keys are generated without passphrases for automation purposes
+- SSH server is configured to allow password authentication initially
 - The SSH config disables StrictHostKeyChecking and doesn't save known hosts
 - Consider adding passphrases to keys manually for additional security
+- For production systems, you should disable password authentication and only allow key-based login
 
 ## Customization
 
@@ -77,6 +114,7 @@ Feel free to fork this repository and customize the bootstrap script to your nee
 - Add additional software packages to install
 - Modify SSH key settings
 - Change dotfiles repository location
+- Adjust SSH server security settings
 
 ## License
 
