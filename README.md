@@ -12,11 +12,11 @@ A cross-platform system bootstrap script that automatically sets up a new system
   - python3
   - python3-pip
   - openssh-server (for remote access)
-  - avahi-daemon (for .local hostname resolution)
 - Clones your dotfiles repository
 - Sets up SSH keys for GitHub and general use
 - Configures SSH server for remote access
 - Adds machine hostname to SSH config for easy connections
+- Provides information for Ubiquiti UDM configuration
 
 ## Supported Operating Systems
 
@@ -61,7 +61,9 @@ chmod +x bootstrap.sh
    - Installs and enables SSH server
    - Configures system for incoming SSH connections
    - Adds the machine's hostname to SSH config for easy access
-   - Enables Avahi daemon for .local hostname resolution (Linux)
+6. **UDM Integration**:
+   - Displays system information for configuring DNS in Ubiquiti UDM
+   - Shows IP addresses and hostname for easy reference
 
 ## SSH Key Management
 
@@ -72,32 +74,45 @@ The script generates two SSH keys:
 
 After running the script, remember to add the GitHub SSH key to your GitHub account at: https://github.com/settings/keys
 
-## Remote Access Configuration
+## Ubiquiti UDM Integration
 
-The bootstrap script automatically configures the system for SSH access by:
+This script is designed to work well with a Ubiquiti UDM for DNS resolution:
 
-1. Installing and enabling the SSH server
-2. Setting up proper SSH server configuration
-3. Adding entries to your SSH config file for easy connection:
-   - `hostname` - Connect via mDNS/Avahi (.local domain)
-   - `hostname-ip` - Connect via IP address
-   - `hostname-fqdn` - Connect via fully qualified domain name (if available)
-
-### Connecting to Your Machine
-
-From another system, you can:
-
-1. Copy your SSH key to this machine (first-time setup):
-   ```bash
-   ssh-copy-id user@hostname.local
-   ```
-
-2. Then simply connect using:
+1. When you run the bootstrap script, it will display the system's hostname and IP address(es)
+2. Add this information to your UDM's DNS records:
+   - In the UDM interface, go to Settings > Networks > Your Network > Advanced > DHCP Name Server
+   - Add a static DNS record with the hostname and IP address shown by the script
+3. Once configured in your UDM, you can connect to the machine using its hostname:
    ```bash
    ssh hostname
    ```
 
-The script automatically creates shortcut entries in your SSH config based on the system's hostname.
+### Example UDM Configuration
+
+After running the script, you'll see output like:
+
+```
+Machine information for UDM configuration:
+- Hostname: mydevmachine
+- Username: developer
+- IP addresses:
+  1. 192.168.1.50
+
+Add this machine to your UDM with:
+  Hostname: mydevmachine
+  IP: 192.168.1.50
+```
+
+Use this information to add a DNS record in your UDM.
+
+## SSH Config Details
+
+The script automatically adds entries to your SSH config (`~/.ssh/config`) for:
+
+1. **Hostname-based access**: `ssh hostname`
+2. **IP-based access**: `ssh hostname-ip1`, `ssh hostname-ip2`, etc. (if multiple network interfaces)
+
+This makes it easy to connect to your machines even before configuring DNS in your UDM.
 
 ## Security Considerations
 
