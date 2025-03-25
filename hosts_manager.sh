@@ -32,6 +32,32 @@ SCRIPT_PATH="$DOTFILES_DIR/hosts_manager.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh"
 GITIGNORE_PATH="$DOTFILES_DIR/.gitignore"
 
+# WSL detection and related functions
+is_wsl() {
+    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+get_windows_host_ip() {
+    # Get the IP of the Windows host from the default route in WSL
+    ip route | grep default | awk '{print $3}'
+}
+
+is_wsl_ip() {
+    local ip="$1"
+    
+    # Check if IP is in WSL ranges
+    if [[ "$ip" == 172.1[6-9].* ]] || [[ "$ip" == 172.2[0-9].* ]] || 
+       [[ "$ip" == 172.3[0-1].* ]] || [[ "$ip" == 10.255.255.* ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Parse command line arguments
 parse_args() {
     while [ "$#" -gt 0 ]; do
@@ -81,6 +107,11 @@ parse_args() {
                 echo "  --remove-cron       Remove the auto-sync cron job"
                 echo "  --distribute-keys    Copy SSH public key to all registered hosts"
                 echo "  -h, --help          Show help message"
+                echo ""
+                echo "WSL Compatibility:"
+                echo "  When run in WSL, this script will automatically use the Windows host IP"
+                echo "  instead of the WSL-specific IP, allowing proper SSH connectivity between hosts."
+                echo "  It will also fix any existing host entries that use WSL-specific IP addresses."
                 exit 0
                 ;;
             *)
@@ -196,18 +227,33 @@ register_host() {
     
     # Get IP addresses
     declare -a IP_ADDRESSES
-    if command -v ip &> /dev/null; then
-        # Modern Linux with ip command
-        readarray -t IP_ADDRESSES < <(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
-    elif command -v ifconfig &> /dev/null; then
-        # Older Linux with ifconfig
-        readarray -t IP_ADDRESSES < <(ifconfig | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
-    elif command -v ipconfig &> /dev/null; then
-        # Windows
-        readarray -t IP_ADDRESSES < <(ipconfig | grep -i "IPv4 Address" | grep -oP '(?<=:\s)\d+(\.\d+){3}')
-    elif [ "$(uname)" == "Darwin" ]; then
-        # macOS
-        readarray -t IP_ADDRESSES < <(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}')
+    
+    # Check if running in WSL
+    if is_wsl; then
+        log_info "Detected WSL environment"
+        # Get Windows host IP for primary access
+        WINDOWS_IP=$(get_windows_host_ip)
+        if [ -n "$WINDOWS_IP" ]; then
+            log_info "Using Windows host IP ($WINDOWS_IP) as primary address"
+            IP_ADDRESSES+=("$WINDOWS_IP")
+        fi
+    fi
+    
+    # Get system IP addresses
+    if [ ${#IP_ADDRESSES[@]} -eq 0 ]; then
+        if command -v ip &> /dev/null; then
+            # Modern Linux with ip command
+            readarray -t IP_ADDRESSES < <(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
+        elif command -v ifconfig &> /dev/null; then
+            # Older Linux with ifconfig
+            readarray -t IP_ADDRESSES < <(ifconfig | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1')
+        elif command -v ipconfig &> /dev/null; then
+            # Windows
+            readarray -t IP_ADDRESSES < <(ipconfig | grep -i "IPv4 Address" | grep -oP '(?<=:\s)\d+(\.\d+){3}')
+        elif [ "$(uname)" == "Darwin" ]; then
+            # macOS
+            readarray -t IP_ADDRESSES < <(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}')
+        fi
     fi
     
     # Create host file in hosts.d directory
@@ -334,6 +380,81 @@ check_ssh_config_include() {
     else
         # No hosts include found at all
         return 1
+    fi
+}
+
+# Fix WSL host entries by updating any WSL IP addresses to Windows host IPs
+fix_wsl_host_files() {
+    log_step "Checking for WSL IP addresses in host configurations"
+    
+    local windows_ip=""
+    local fixed_count=0
+    
+    # Process each host configuration file
+    for host_file in "$HOSTS_DIR"/*.conf; do
+        if [ ! -f "$host_file" ]; then
+            continue
+        fi
+        
+        local contains_wsl_ip=false
+        
+        # Check if this host file contains any WSL IPs
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^[[:space:]]*HostName[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                ip="${BASH_REMATCH[1]}"
+                if is_wsl_ip "$ip"; then
+                    contains_wsl_ip=true
+                    log_info "Found WSL IP $ip in $(basename "$host_file")"
+                    break
+                fi
+            fi
+        done < "$host_file"
+        
+        # If this host has WSL IPs, try to fix them
+        if [ "$contains_wsl_ip" = true ]; then
+            # Get Windows host IP if we don't have it yet
+            if [ -z "$windows_ip" ]; then
+                windows_ip=$(get_windows_host_ip)
+                if [ -z "$windows_ip" ]; then
+                    log_error "Could not determine Windows host IP, skipping WSL IP fixes"
+                    return 1
+                fi
+            fi
+            
+            # Create a temp file for the update
+            local tmp_file="${host_file}.tmp"
+            
+            # Update WSL IPs to Windows host IP
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^([[:space:]]*HostName[[:space:]]+)([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)(.*) ]]; then
+                    prefix="${BASH_REMATCH[1]}"
+                    ip="${BASH_REMATCH[2]}"
+                    suffix="${BASH_REMATCH[3]}"
+                    
+                    if is_wsl_ip "$ip"; then
+                        # Replace with Windows host IP and add comment
+                        echo "${prefix}${windows_ip}${suffix} # Was WSL IP: $ip" >> "$tmp_file"
+                    else
+                        echo "$line" >> "$tmp_file"
+                    fi
+                else
+                    echo "$line" >> "$tmp_file"
+                fi
+            done < "$host_file"
+            
+            # Replace old file with updated one
+            mv "$tmp_file" "$host_file"
+            fixed_count=$((fixed_count + 1))
+            log_info "Fixed WSL IP addresses in $(basename "$host_file")"
+        fi
+    done
+    
+    if [ "$fixed_count" -gt 0 ]; then
+        log_info "Fixed $fixed_count host files with WSL IP addresses"
+        # Regenerate the hosts file to apply changes
+        generate_hosts_file
+    else
+        log_info "No host files with WSL IP addresses found"
     fi
 }
 
@@ -606,6 +727,14 @@ distribute_ssh_keys() {
                 continue
             fi
             
+            # Skip hosts with WSL IP addresses
+            if is_wsl_ip "$ip"; then
+                log_warn "Skipping host $hostname with WSL IP: $ip"
+                log_info "WSL systems should be accessed through the Windows host IP instead"
+                failed_hosts+=("$hostname (WSL IP: $ip)")
+                continue
+            fi
+            
             # Attempt to copy SSH key
             log_info "Copying SSH key to $username@$hostname ($ip)..."
             
@@ -695,6 +824,10 @@ main() {
     # Normal sync flow continues
     sync_dotfiles
     register_host
+    
+    # Fix any WSL IPs in host files
+    fix_wsl_host_files
+    
     generate_hosts_file
     install_hosts
     commit_changes
@@ -725,6 +858,8 @@ main() {
     # Show additional help hints
     show_help_hints
 }
+
+# Whitespace intentionally added for script readability
 
 # Run the main function
 main "$@"
