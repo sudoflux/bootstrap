@@ -610,7 +610,7 @@ distribute_ssh_keys() {
         
         # Try to copy the key using ssh-copy-id
         if command -v ssh-copy-id >/dev/null 2>&1; then
-            if ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip" >/dev/null 2>&1; then
+            if ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip"; then
                 ((success_count++))
                 log_info "Successfully copied key to $hostname"
             else
@@ -619,7 +619,7 @@ distribute_ssh_keys() {
                 
                 # Try alternative method if ssh-copy-id fails
                 log_info "Trying alternative method for $hostname..."
-                if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" >/dev/null 2>&1; then
+                if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
                     ((success_count++))
                     # Remove from failed hosts if alternative method succeeds
                     failed_hosts=("${failed_hosts[@]/$hostname}")
@@ -630,7 +630,7 @@ distribute_ssh_keys() {
             fi
         else
             # If ssh-copy-id is not available, use the alternative method directly
-            if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" >/dev/null 2>&1; then
+            if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
                 ((success_count++))
                 log_info "Successfully copied key to $hostname"
             else
