@@ -42,8 +42,31 @@ is_wsl() {
 }
 
 get_windows_host_ip() {
-    # Get the IP of the Windows host from the default route in WSL
-    ip route | grep default | awk '{print $3}'
+    # Get the IP of the Windows host with multiple fallback methods
+    
+    # Method 1: Try getting IP from /etc/resolv.conf - most reliable for WSL2
+    local win_ip=$(grep -oP "(?<=nameserver )[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" /etc/resolv.conf | head -1)
+    
+    # Method 2: If Method 1 failed (empty or 127.0.0.1), try default route
+    if [ -z "$win_ip" ] || [ "$win_ip" = "127.0.0.1" ]; then
+        win_ip=$(ip route | grep default | grep -oP "(?<=via )[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+    fi
+    
+    # Method 3: If still not found, try eth0 gateway
+    if [ -z "$win_ip" ] || [ "$win_ip" = "127.0.0.1" ]; then
+        win_ip=$(ip route show dev eth0 2>/dev/null | grep default | grep -oP "(?<=via )[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+    fi
+    
+    # Method 4: Last resort - use hostname command, which might return the Windows hostname
+    if [ -z "$win_ip" ]; then
+        # Try to resolve the Windows hostname
+        local win_hostname=$(hostname.exe 2>/dev/null)
+        if [ -n "$win_hostname" ]; then
+            win_ip=$(getent hosts "$win_hostname" 2>/dev/null | awk '{print $1}')
+        fi
+    fi
+    
+    echo "$win_ip"
 }
 
 is_wsl_ip() {
@@ -56,6 +79,29 @@ is_wsl_ip() {
     else
         return 1
     fi
+}
+
+# Get external IP using a public service
+get_external_ip() {
+    # Try different services to get external IP
+    local external_ip=""
+    
+    # Method 1: curl ifconfig.me
+    if command -v curl &>/dev/null; then
+        external_ip=$(curl -s -m 5 ifconfig.me 2>/dev/null)
+    fi
+    
+    # Method 2: wget ifconfig.me
+    if [ -z "$external_ip" ] && command -v wget &>/dev/null; then
+        external_ip=$(wget -q -O - ifconfig.me 2>/dev/null)
+    fi
+    
+    # Validate IP format
+    if [[ ! "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        external_ip=""
+    fi
+    
+    echo "$external_ip"
 }
 
 # Parse command line arguments
@@ -231,15 +277,35 @@ register_host() {
     # Check if running in WSL
     if is_wsl; then
         log_info "Detected WSL environment"
-        # Get Windows host IP for primary access
+        
+        # Try different methods to get the Windows host IP
         WINDOWS_IP=$(get_windows_host_ip)
         if [ -n "$WINDOWS_IP" ]; then
             log_info "Using Windows host IP ($WINDOWS_IP) as primary address"
             IP_ADDRESSES+=("$WINDOWS_IP")
         fi
+        
+        # Try to get external IP for accessibility from the internet
+        EXTERNAL_IP=$(get_external_ip)
+        if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "$WINDOWS_IP" ]; then
+            log_info "Also detected external IP: $EXTERNAL_IP"
+            if [ ${#IP_ADDRESSES[@]} -eq 0 ]; then
+                IP_ADDRESSES+=("$EXTERNAL_IP")
+            fi
+        fi
+        
+        # Fallback: If no usable IP found, ask user for IP
+        if [ ${#IP_ADDRESSES[@]} -eq 0 ]; then
+            log_warn "Could not determine a suitable IP address for this WSL host"
+            log_warn "Please enter the IP address that other machines can use to reach this host:"
+            read -p "IP Address: " USER_IP
+            if [ -n "$USER_IP" ]; then
+                IP_ADDRESSES+=("$USER_IP")
+            fi
+        fi
     fi
     
-    # Get system IP addresses
+    # Get system IP addresses if no WSL-specific IPs were found
     if [ ${#IP_ADDRESSES[@]} -eq 0 ]; then
         if command -v ip &> /dev/null; then
             # Modern Linux with ip command
@@ -388,6 +454,7 @@ fix_wsl_host_files() {
     log_step "Checking for WSL IP addresses in host configurations"
     
     local windows_ip=""
+    local external_ip=""
     local fixed_count=0
     
     # Process each host configuration file
@@ -416,10 +483,20 @@ fix_wsl_host_files() {
             if [ -z "$windows_ip" ]; then
                 windows_ip=$(get_windows_host_ip)
                 if [ -z "$windows_ip" ]; then
-                    log_error "Could not determine Windows host IP, skipping WSL IP fixes"
-                    return 1
+                    log_warn "Could not determine Windows host IP"
+                    # Try to get external IP
+                    external_ip=$(get_external_ip)
+                    if [ -z "$external_ip" ]; then
+                        log_error "Could not determine any usable IP address, skipping WSL IP fixes"
+                        return 1
+                    else
+                        log_info "Using external IP ($external_ip) for fixing WSL hosts"
+                    fi
                 fi
             fi
+            
+            # Choose which IP to use for fixing
+            local replacement_ip="${windows_ip:-$external_ip}"
             
             # Create a temp file for the update
             local tmp_file="${host_file}.tmp"
@@ -433,7 +510,7 @@ fix_wsl_host_files() {
                     
                     if is_wsl_ip "$ip"; then
                         # Replace with Windows host IP and add comment
-                        echo "${prefix}${windows_ip}${suffix} # Was WSL IP: $ip" >> "$tmp_file"
+                        echo "${prefix}${replacement_ip}${suffix} # Was WSL IP: $ip" >> "$tmp_file"
                     else
                         echo "$line" >> "$tmp_file"
                     fi
