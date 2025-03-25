@@ -127,6 +127,16 @@ detect_os() {
         log_error "Unsupported OS"
         exit 1
     fi
+    
+    # Get hostname and sanitize it for use in SSH config
+    HOSTNAME=$(hostname)
+    SANITIZED_HOSTNAME=$(echo "$HOSTNAME" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-')
+    
+    # If sanitized hostname is empty for some reason, use a default
+    if [ -z "$SANITIZED_HOSTNAME" ]; then
+        SANITIZED_HOSTNAME="localhost"
+        log_warn "Could not determine valid hostname, using 'localhost'"
+    fi
 }
 
 # Install system updates and essential tools based on OS
@@ -325,7 +335,7 @@ setup_ssh_keys() {
     # Generate general SSH key if it doesn't exist
     if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
         log_info "Generating general SSH key..."
-        ssh-keygen -t ed25519 -C "$USER@$(hostname)" -f "$HOME/.ssh/id_ed25519" -N ""
+        ssh-keygen -t ed25519 -C "$USER@$HOSTNAME" -f "$HOME/.ssh/id_ed25519" -N ""
         log_info "General SSH key generated"
         keys_generated=true
     else
@@ -466,10 +476,6 @@ setup_dotfiles() {
 # Set up SSH server for incoming connections
 setup_ssh_server() {
     log_step "Setting up SSH server for incoming connections"
-    
-    # Get hostname and sanitize it for use in SSH config
-    HOSTNAME=$(hostname)
-    SANITIZED_HOSTNAME=$(echo "$HOSTNAME" | tr '[:upper:]' '[:lower:]' | tr -d '[^a-z0-9-]')
     
     local server_configured=false
     
@@ -633,8 +639,8 @@ EOF
             log_info "Updating IP addresses in SSH config (--force enabled)..."
             
             # Remove existing IP entries for this host
-            sed -i.bak "/^# This machine via IP address/d" "$SSH_CONFIG"
-            sed -i.bak "/^Host ${SANITIZED_HOSTNAME}-ip[0-9]*/,/^$/d" "$SSH_CONFIG"
+            sed -i.bak "/^# This machine via IP address/d" "$SSH_CONFIG" 2>/dev/null || true
+            sed -i.bak "/^Host ${SANITIZED_HOSTNAME}-ip[0-9]*/,/^$/d" "$SSH_CONFIG" 2>/dev/null || true
             
             # Add updated IP entries
             local i=1
@@ -697,8 +703,8 @@ main() {
     # Execute steps in proper order
     detect_os
     install_packages
-    setup_ssh_keys   # Set up SSH keys and config first
-    setup_dotfiles   # Then handle dotfiles (but still use HTTPS)
+    setup_ssh_keys
+    setup_dotfiles
     setup_ssh_server
     
     log_step "Bootstrap Complete"
@@ -711,7 +717,7 @@ main() {
     log_info "Remember to add your GitHub SSH key to your GitHub account!"
     log_info ""
     log_info "System information for UDM configuration:"
-    log_info "- Hostname: $(hostname)"
+    log_info "- Hostname: $HOSTNAME"
     log_info "- User: $USER"
     if [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
         log_info "- Primary IP: ${IP_ADDRESSES[0]}"
