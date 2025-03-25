@@ -22,24 +22,35 @@ A cross-platform system bootstrap script that automatically sets up a new system
 
 ## Quick Install
 
-Run this command to download and execute the bootstrap script:
+### Basic Install (Default Options)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh | bash
 ```
 
-Or download and run manually with options:
+### With Command Line Arguments
 
+To pass command line arguments like `--force` or `--verbose` when using `curl`, use one of these methods:
+
+**Method 1: Download and run separately**
 ```bash
 # Download the script
-curl -O https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh
+curl -fsSL -o bootstrap.sh https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh
 
-# Make it executable
+# Make executable
 chmod +x bootstrap.sh
 
-# Run with options
+# Run with arguments
 ./bootstrap.sh --verbose --force
 ```
+
+**Method 2: Use bash -s**
+```bash
+# Download and pipe to bash with arguments
+curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh | bash -s -- --verbose --force
+```
+
+Note the `--` after `-s` is needed to separate bash options from the script's options.
 
 ## Command Line Options
 
