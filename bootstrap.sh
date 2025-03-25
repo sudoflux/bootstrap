@@ -595,72 +595,12 @@ setup_ssh_server() {
         # Get IP addresses from Windows/Git Bash
         readarray -t IP_ADDRESSES < <(ipconfig | grep -i "IPv4 Address" | grep -oP '(?<=:\s)\d+(\.\d+){3}')
     fi
+
+    # Note: We're no longer modifying SSH config directly in bootstrap.sh
+    # Instead, we'll let hosts_manager.sh handle adding this machine to SSH config
+    # This prevents having uncommitted changes in the dotfiles repository
     
-    # Add system host entry to SSH config for easy connection
-    SSH_CONFIG="$HOME/.ssh/config"
-    local ssh_config_updated=false
-    
-    # Create host entries for this machine
-    if ! grep -q "Host $SANITIZED_HOSTNAME" "$SSH_CONFIG"; then
-        log_info "Adding this machine to your SSH config for easy access..."
-        
-        cat <<EOF >> "$SSH_CONFIG"
-# This machine ($HOSTNAME)
-Host $SANITIZED_HOSTNAME
-    HostName $SANITIZED_HOSTNAME
-    User $USER
-    AddKeysToAgent yes
-    IdentityFile ~/.ssh/id_ed25519
-
-EOF
-        ssh_config_updated=true
-        
-        # Add each IP address as a separate entry
-        if [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
-            local i=1
-            for IP in "${IP_ADDRESSES[@]}"; do
-                cat <<EOF >> "$SSH_CONFIG"
-# This machine via IP address $i
-Host ${SANITIZED_HOSTNAME}-ip${i}
-    HostName $IP
-    User $USER
-    AddKeysToAgent yes
-    IdentityFile ~/.ssh/id_ed25519
-
-EOF
-                i=$((i+1))
-            done
-        fi
-    else
-        log_info "This machine is already in your SSH config"
-        
-        # Check if IP entries need updating
-        if [ "$FORCE_UPDATE" = true ] && [ ${#IP_ADDRESSES[@]} -gt 0 ]; then
-            log_info "Updating IP addresses in SSH config (--force enabled)..."
-            
-            # Remove existing IP entries for this host
-            sed -i.bak "/^# This machine via IP address/d" "$SSH_CONFIG" 2>/dev/null || true
-            sed -i.bak "/^Host ${SANITIZED_HOSTNAME}-ip[0-9]*/,/^$/d" "$SSH_CONFIG" 2>/dev/null || true
-            
-            # Add updated IP entries
-            local i=1
-            for IP in "${IP_ADDRESSES[@]}"; do
-                cat <<EOF >> "$SSH_CONFIG"
-# This machine via IP address $i
-Host ${SANITIZED_HOSTNAME}-ip${i}
-    HostName $IP
-    User $USER
-    AddKeysToAgent yes
-    IdentityFile ~/.ssh/id_ed25519
-
-EOF
-                i=$((i+1))
-            done
-            ssh_config_updated=true
-        fi
-    fi
-
-    if [ "$server_configured" = true ] || [ "$ssh_config_updated" = true ]; then
+    if [ "$server_configured" = true ]; then
         log_info "SSH server configuration updated"
     else
         log_info "SSH server configuration is already up-to-date"
