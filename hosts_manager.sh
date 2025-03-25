@@ -6,6 +6,13 @@
 
 set -e
 
+# Global variables
+VERBOSE=false
+AUTO_SYNC=false
+UPDATE_ONLY=false
+CRON_SETUP=false
+CRON_UNINSTALL=false
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -18,12 +25,63 @@ DOTFILES_DIR="$HOME/dotfiles"
 HOSTS_DIR="$DOTFILES_DIR/.ssh/hosts.d"
 HOSTS_FILE="$DOTFILES_DIR/.ssh/hosts"
 SSH_CONFIG="$HOME/.ssh/config"
+SCRIPT_PATH="$DOTFILES_DIR/hosts_manager.sh"
+
+# Parse command line arguments
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -u|--update-only)
+                UPDATE_ONLY=true
+                shift
+                ;;
+            -a|--auto-sync)
+                AUTO_SYNC=true
+                shift
+                ;;
+            --setup-cron)
+                CRON_SETUP=true
+                shift
+                ;;
+            --remove-cron)
+                CRON_UNINSTALL=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: $0 [options]"
+                echo ""
+                echo "Options:"
+                echo "  -v, --verbose       Enable verbose output"
+                echo "  -u, --update-only   Only update hosts from repository (don't register this host)"
+                echo "  -a, --auto-sync     Set up a daily cron job to keep hosts in sync"
+                echo "  --setup-cron        Set up cron job only (no other actions)"
+                echo "  --remove-cron       Remove the auto-sync cron job"
+                echo "  -h, --help          Show this help message"
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo "Use -h or --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
 
 # Log functions
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+log_debug() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "[DEBUG] $1"
+    fi
+}
 
 # Check prerequisites
 check_prereqs() {
@@ -41,11 +99,23 @@ check_prereqs() {
     # Ensure the hosts file exists
     touch "$HOSTS_FILE"
     
+    # Copy this script to dotfiles if it doesn't exist there
+    if [ ! -f "$SCRIPT_PATH" ] && [ -f "$0" ] && [ "$0" != "$SCRIPT_PATH" ]; then
+        log_info "Copying hosts_manager.sh to dotfiles for future use"
+        cp "$0" "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
+    fi
+    
     log_info "Prerequisites checked"
 }
 
 # Register the current host
 register_host() {
+    if [ "$UPDATE_ONLY" = true ]; then
+        log_info "Update-only mode: Skipping host registration"
+        return
+    fi
+    
     log_step "Registering this host in your dotfiles"
     
     # Get hostname and sanitize it
@@ -144,6 +214,11 @@ EOF
 
 # Commit changes to dotfiles
 commit_changes() {
+    if [ "$UPDATE_ONLY" = true ] && [ "$VERBOSE" != true ]; then
+        # Skip verbose output in update-only mode unless verbose is enabled
+        return
+    fi
+    
     log_step "Committing changes to dotfiles repository"
     
     cd "$DOTFILES_DIR"
@@ -210,8 +285,88 @@ Include $HOSTS_FILE\\
     chmod 600 "$SSH_CONFIG" "$HOSTS_FILE" 2>/dev/null || true
 }
 
+# Set up cron job for automatic sync
+setup_cron() {
+    log_step "Setting up automatic sync via cron"
+    
+    if ! command -v crontab >/dev/null 2>&1; then
+        log_warn "Cron is not available on this system. Skipping auto-sync setup."
+        return 1
+    fi
+    
+    # Make sure the script exists in dotfiles
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        if [ -f "$0" ] && [ "$0" != "$SCRIPT_PATH" ]; then
+            log_info "Copying hosts_manager.sh to dotfiles for cron use"
+            cp "$0" "$SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+        else
+            log_error "Cannot find hosts_manager.sh to set up cron job"
+            return 1
+        fi
+    fi
+    
+    # Remove any existing cron entry first
+    crontab -l 2>/dev/null | grep -v "hosts_manager.sh" | crontab -
+    
+    # Add new cron job to run daily at 3:00 AM
+    (crontab -l 2>/dev/null; echo "0 3 * * * $SCRIPT_PATH --update-only >/dev/null 2>&1") | crontab -
+    
+    log_info "Auto-sync cron job set up to run daily at 3:00 AM"
+    return 0
+}
+
+# Remove cron job
+remove_cron() {
+    log_step "Removing automatic sync cron job"
+    
+    if ! command -v crontab >/dev/null 2>&1; then
+        log_warn "Cron is not available on this system."
+        return 1
+    fi
+    
+    # Remove the cron entry
+    crontab -l 2>/dev/null | grep -v "hosts_manager.sh" | crontab -
+    
+    log_info "Auto-sync cron job removed"
+    return 0
+}
+
+# Sync dotfiles
+sync_dotfiles() {
+    log_step "Syncing dotfiles repository"
+    
+    cd "$DOTFILES_DIR"
+    
+    # Pull the latest changes
+    log_info "Pulling latest changes from repository"
+    
+    if git pull; then
+        log_info "Dotfiles repository updated"
+    else
+        log_warn "Failed to pull latest changes. Local changes may be present."
+        log_info "Consider manually running: cd $DOTFILES_DIR && git stash && git pull"
+    fi
+}
+
 # Main function
 main() {
+    # Parse command line arguments
+    parse_args "$@"
+    
+    # Handle cron-only operations
+    if [ "$CRON_SETUP" = true ]; then
+        check_prereqs
+        setup_cron
+        exit 0
+    fi
+    
+    if [ "$CRON_UNINSTALL" = true ]; then
+        remove_cron
+        exit 0
+    fi
+    
+    # Regular operation
     log_step "SSH Hosts Manager"
     echo "This script manages shared SSH hosts across your machines"
     echo "It will add this host to your dotfiles repository and"
@@ -219,10 +374,16 @@ main() {
     echo ""
     
     check_prereqs
+    sync_dotfiles
     register_host
     generate_hosts_file
     install_hosts
     commit_changes
+    
+    # Set up cron job if requested
+    if [ "$AUTO_SYNC" = true ]; then
+        setup_cron
+    fi
     
     log_step "All Done!"
     log_info "This host is now registered in your dotfiles"
@@ -232,6 +393,15 @@ main() {
     log_info "On each new machine, after running bootstrap.sh, you can run:"
     log_info "  $DOTFILES_DIR/hosts_manager.sh"
     log_info "to register that machine and get access to all other registered hosts"
+    
+    if [ "$AUTO_SYNC" = true ]; then
+        echo ""
+        log_info "Automatic sync has been set up. Your hosts will stay updated daily."
+    else
+        echo ""
+        log_info "To enable automatic sync via cron, run:"
+        log_info "  $0 --auto-sync"
+    fi
 }
 
 # Run the main function
