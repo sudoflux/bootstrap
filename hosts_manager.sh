@@ -796,6 +796,12 @@ distribute_ssh_keys() {
             local username=$(grep "User " "$host_file" | head -n1 | awk '{print $2}')
             local ip=$(grep "HostName " "$host_file" | head -n1 | awk '{print $2}')
             
+            # Handle empty values
+            if [ -z "$hostname" ] || [ -z "$username" ] || [ -z "$ip" ]; then
+                log_warn "Invalid host file format: $host_file (missing hostname, username, or IP)"
+                continue
+            fi
+            
             log_debug "Found host: $hostname (user: $username, ip: $ip)"
             
             # Skip current host
@@ -812,6 +818,56 @@ distribute_ssh_keys() {
                 continue
             fi
             
+            # Function to try SSH key distribution with a given IP
+            try_key_distribution() {
+                local target_ip="$1"
+                local target_name="$2"
+                local error_file=$(mktemp)
+                
+                # Try to pre-accept the host key without prompting
+                log_debug "Pre-accepting host key for $target_name ($target_ip)"
+                if ! ssh-keyscan -H "$target_ip" >> "$HOME/.ssh/known_hosts" 2>/dev/null; then
+                    log_debug "ssh-keyscan failed for $target_ip, but continuing anyway"
+                fi
+                
+                # Using common SSH options to avoid prompts
+                local ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=no -o ConnectTimeout=10"
+                
+                # First check if the host is reachable
+                log_debug "Testing if host $target_ip is reachable..."
+                timeout 5 bash -c "ping -c 1 $target_ip" >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                    log_debug "Host $target_ip did not respond to ping, but will try SSH anyway"
+                fi
+                
+                # Attempt to copy SSH key
+                if command -v ssh-copy-id &> /dev/null; then
+                    # Use ssh-copy-id if available
+                    log_debug "Attempting ssh-copy-id to $username@$target_ip"
+                    if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$target_ip" 2>"$error_file"; then
+                        log_info "Successfully copied key to $target_name using IP $target_ip"
+                        rm -f "$error_file"
+                        return 0
+                    else
+                        log_debug "ssh-copy-id failed for $target_ip: $(cat "$error_file")"
+                        rm -f "$error_file"
+                        return 1
+                    fi
+                else
+                    # Alternative method if ssh-copy-id is not available
+                    log_debug "ssh-copy-id not available, using alternative method"
+                    if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$target_ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" 2>"$error_file"; then
+                        log_info "Successfully copied key to $target_name using IP $target_ip"
+                        rm -f "$error_file"
+                        return 0
+                    else
+                        log_debug "SSH failed for $target_ip: $(cat "$error_file")"
+                        rm -f "$error_file"
+                        return 1
+                    fi
+                fi
+            }
+            
             # Attempt to copy SSH key
             log_info "Copying SSH key to $username@$hostname ($ip)..."
             
@@ -824,41 +880,16 @@ distribute_ssh_keys() {
                 log_debug "Created backup of known_hosts at $known_hosts_backup"
             fi
             
-            # Try to pre-accept the host key without prompting
-            log_debug "Pre-accepting host key for $hostname ($ip)"
-            ssh-keyscan -H "$ip" >> "$HOME/.ssh/known_hosts" 2>/dev/null
-            
-            # Using common SSH options to avoid prompts
-            local ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=no -o ConnectTimeout=10"
-            
             local key_copied=false
             
             # First attempt with primary IP
-            if command -v ssh-copy-id &> /dev/null; then
-                # Use ssh-copy-id if available
-                if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip"; then
-                    log_info "Successfully copied key to $hostname using primary IP"
-                    key_copied=true
-                    success_count=$((success_count + 1))
-                else
-                    log_warn "Failed to copy key to $hostname using primary IP, will try aliases if available"
-                    # Continue to aliases below
-                fi
+            if try_key_distribution "$ip" "$hostname"; then
+                key_copied=true
+                success_count=$((success_count + 1))
             else
-                # Alternative method if ssh-copy-id is not available
-                if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
-                    log_info "Successfully copied key to $hostname using primary IP"
-                    key_copied=true
-                    success_count=$((success_count + 1))
-                else
-                    log_warn "Failed to copy key to $hostname using primary IP, will try aliases if available"
-                    # Continue to aliases below
-                fi
-            fi
-            
-            # If primary IP failed, try all aliases for this host
-            if [ "$key_copied" = false ]; then
-                # Find all IP aliases for this hostname in the config file
+                log_warn "Failed to copy key to $hostname using primary IP, will try aliases if available"
+                
+                # Try all aliases for this host
                 local alias_count=1
                 local alias_found=true
                 
@@ -876,24 +907,10 @@ distribute_ssh_keys() {
                         
                         log_info "Trying IP alias $alias_count: $username@$alias_hostname ($alias_ip)..."
                         
-                        # Try to pre-accept the host key for the alias
-                        ssh-keyscan -H "$alias_ip" >> "$HOME/.ssh/known_hosts" 2>/dev/null
-                        
-                        # Attempt to copy key using this alias
-                        if command -v ssh-copy-id &> /dev/null; then
-                            if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$alias_ip"; then
-                                log_info "Successfully copied key to $hostname using alias $alias_hostname"
-                                key_copied=true
-                                success_count=$((success_count + 1))
-                                break
-                            fi
-                        else
-                            if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$alias_ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
-                                log_info "Successfully copied key to $hostname using alias $alias_hostname"
-                                key_copied=true
-                                success_count=$((success_count + 1))
-                                break
-                            fi
+                        if try_key_distribution "$alias_ip" "$hostname (via alias $alias_hostname)"; then
+                            key_copied=true
+                            success_count=$((success_count + 1))
+                            break
                         fi
                         
                         # Move to next alias
@@ -928,7 +945,14 @@ distribute_ssh_keys() {
         log_info "  ssh-copy-id -i ~/.ssh/id_ed25519.pub username@hostname"
         log_info "or:"
         log_info "  cat ~/.ssh/id_ed25519.pub | ssh username@hostname \"mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys\""
-        return 1
+        
+        # Consider it a success if at least one host worked
+        if [ $success_count -gt 0 ]; then
+            log_info "Partial success: Successfully distributed keys to $success_count hosts out of $(($success_count + ${#failed_hosts[@]}))"
+            return 0
+        else 
+            return 1
+        fi
     fi
     
     return 0
