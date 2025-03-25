@@ -12,6 +12,7 @@ AUTO_SYNC=false
 UPDATE_ONLY=false
 CRON_SETUP=false
 CRON_UNINSTALL=false
+FORCE_SSH_CONFIG=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -45,6 +46,10 @@ parse_args() {
                 AUTO_SYNC=true
                 shift
                 ;;
+            -f|--force-ssh-config)
+                FORCE_SSH_CONFIG=true
+                shift
+                ;;
             --setup-cron)
                 CRON_SETUP=true
                 shift
@@ -60,6 +65,7 @@ parse_args() {
                 echo "  -v, --verbose       Enable verbose output"
                 echo "  -u, --update-only   Only update hosts from repository (don't register this host)"
                 echo "  -a, --auto-sync     Set up a daily cron job to keep hosts in sync"
+                echo "  -f, --force-ssh-config  Force updating the SSH config even if it seems to be included"
                 echo "  --setup-cron        Set up cron job only (no other actions)"
                 echo "  --remove-cron       Remove the auto-sync cron job"
                 echo "  -h, --help          Show this help message"
@@ -100,6 +106,9 @@ check_prereqs() {
     
     # Ensure the hosts file exists
     touch "$HOSTS_FILE"
+    
+    # Make sure .ssh directory exists
+    mkdir -p "$HOME/.ssh"
     
     # Copy this script to dotfiles if it doesn't exist there
     if [ ! -f "$SCRIPT_PATH" ]; then
@@ -297,37 +306,92 @@ commit_changes() {
     fi
 }
 
+# Check if SSH config includes our hosts file
+check_ssh_config_include() {
+    # More precise inclusion check - look for EXACT path, not partial matches
+    if grep -q "^[[:space:]]*Include[[:space:]]\+$HOSTS_FILE\([[:space:]]\|$\)" "$SSH_CONFIG" 2>/dev/null; then
+        return 0  # Found the exact Include line
+    elif grep -q "^[[:space:]]*Include.*hosts" "$SSH_CONFIG" 2>/dev/null; then
+        # Found some hosts include, but not the exact one we want
+        if grep -q "^[[:space:]]*Include.*\.ssh/hosts" "$SSH_CONFIG" 2>/dev/null; then
+            log_warn "Found old .ssh/hosts include in SSH config, will replace it"
+        else
+            log_warn "Found a different hosts include in SSH config, will ensure ours is added"
+        fi
+        return 1
+    else
+        # No hosts include found at all
+        return 1
+    fi
+}
+
 # Install the generated hosts file into SSH config
 install_hosts() {
     log_step "Installing hosts file to SSH config"
     
+    # Ensure SSH config exists
+    if [ ! -f "$SSH_CONFIG" ]; then
+        log_info "Creating SSH config file as it doesn't exist"
+        touch "$SSH_CONFIG"
+        chmod 600 "$SSH_CONFIG"
+    fi
+    
     # Check if hosts inclusion already exists in SSH config
-    if ! grep -q "Include $HOSTS_FILE" "$SSH_CONFIG" 2>/dev/null; then
-        log_info "Adding hosts file inclusion to SSH config"
+    if ! check_ssh_config_include || [ "$FORCE_SSH_CONFIG" = true ]; then
+        if [ "$FORCE_SSH_CONFIG" = true ]; then
+            log_info "Force flag set, updating SSH config Include"
+        else
+            log_info "Adding hosts file inclusion to SSH config"
+        fi
         
         # Back up SSH config first
-        cp "$SSH_CONFIG" "$SSH_CONFIG.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+        local backup_file="$SSH_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$SSH_CONFIG" "$backup_file" 2>/dev/null || true
+        log_info "SSH config backed up to $backup_file"
         
-        # Add the include line at the top of the SSH config
-        if [ -s "$SSH_CONFIG" ]; then
-            # File exists and has content
-            sed -i.bak "1i\\
-# Include generated hosts file from dotfiles\\
-Include $HOSTS_FILE\\
-" "$SSH_CONFIG" 2>/dev/null || \
-            echo -e "# Include generated hosts file from dotfiles\nInclude $HOSTS_FILE\n\n$(cat "$SSH_CONFIG")" > "$SSH_CONFIG"
+        # Look for existing Include directive for old path or other hosts
+        # and replace it instead of adding a new one
+        if grep -q "^[[:space:]]*Include.*hosts" "$SSH_CONFIG" 2>/dev/null; then
+            log_info "Replacing existing hosts Include directive"
+            sed -i.bak "s|^[[:space:]]*Include.*hosts.*$|Include $HOSTS_FILE|" "$SSH_CONFIG" 2>/dev/null || \
+            log_warn "Could not automatically update SSH config with sed, trying alternate method"
         else
-            # File doesn't exist or is empty
-            echo -e "# Include generated hosts file from dotfiles\nInclude $HOSTS_FILE\n" > "$SSH_CONFIG"
+            # Add the include line at the top of the SSH config
+            if [ -s "$SSH_CONFIG" ]; then
+                # File exists and has content
+                log_info "Adding Include directive to the top of SSH config"
+                # Create a temporary file with the new content
+                local temp_file=$(mktemp)
+                echo "# Include generated hosts file from dotfiles" > "$temp_file"
+                echo "Include $HOSTS_FILE" >> "$temp_file"
+                echo "" >> "$temp_file"
+                cat "$SSH_CONFIG" >> "$temp_file"
+                # Replace the original file
+                mv "$temp_file" "$SSH_CONFIG"
+            else
+                # File doesn't exist or is empty
+                log_info "Creating new SSH config with Include directive"
+                echo "# Include generated hosts file from dotfiles" > "$SSH_CONFIG"
+                echo "Include $HOSTS_FILE" >> "$SSH_CONFIG"
+                echo "" >> "$SSH_CONFIG"
+            fi
         fi
         
         log_info "Hosts file included in SSH config"
     else
-        log_info "Hosts file already included in SSH config"
+        log_info "Hosts file already correctly included in SSH config"
     fi
     
     # Make sure permissions are correct
     chmod 600 "$SSH_CONFIG" "$HOSTS_FILE" 2>/dev/null || true
+    
+    # Verify the include was added
+    if check_ssh_config_include; then
+        log_info "Successfully verified SSH config includes hosts file"
+    else
+        log_warn "Failed to verify SSH config includes hosts file - manual check recommended"
+        log_info "Your SSH config should contain: Include $HOSTS_FILE"
+    fi
 }
 
 # Set up cron job for automatic sync
@@ -414,15 +478,21 @@ migrate_from_old_path() {
             cp "$old_hosts_file" "$HOSTS_FILE"
         fi
         
-        # Update the SSH config to point to the new location
-        if grep -q "Include $old_hosts_file" "$SSH_CONFIG" 2>/dev/null; then
-            log_info "Updating SSH config to use new hosts file location"
-            sed -i.bak "s|Include $old_hosts_file|Include $HOSTS_FILE|" "$SSH_CONFIG" 2>/dev/null || \
-            log_warn "Could not automatically update SSH config. You may need to edit it manually."
-        fi
+        # Force SSH config update
+        FORCE_SSH_CONFIG=true
         
         log_info "Migration complete. Safe to remove old files if desired."
     fi
+}
+
+# Display help and hints
+show_help_hints() {
+    log_info "Common commands:"
+    log_info "  $SCRIPT_PATH             # Register and update hosts"
+    log_info "  $SCRIPT_PATH --auto-sync # Enable automatic daily sync"
+    log_info "  $SCRIPT_PATH --update-only # Only update, don't register this host"
+    log_info "  $SCRIPT_PATH -f          # Force update SSH config"
+    log_info ""
 }
 
 # Main function
@@ -479,6 +549,9 @@ main() {
         log_info "To enable automatic sync via cron, run:"
         log_info "  $SCRIPT_PATH --auto-sync"
     fi
+    
+    # Show additional help hints
+    show_help_hints
 }
 
 # Run the main function
