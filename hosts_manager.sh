@@ -303,7 +303,7 @@ commit_changes() {
             log_info "Attempting to push changes to GitHub"
             if git remote -v | grep -q "git@github.com"; then
                 # SSH authentication already set up
-                git push && log_info "Changes pushed to GitHub" || log_warn "Could not push to GitHub. Add your SSH key to GitHub first."
+                GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git push && log_info "Changes pushed to GitHub" || log_warn "Could not push to GitHub. Add your SSH key to GitHub first."
             else
                 log_info "For future updates, consider switching to SSH authentication:"
                 log_info "  cd $DOTFILES_DIR && git remote set-url origin git@github.com:sudoflux/dotfiles.git"
@@ -458,7 +458,8 @@ sync_dotfiles() {
     # Pull the latest changes
     log_info "Pulling latest changes from repository"
     
-    if git pull; then
+    # Use GIT_SSH_COMMAND to disable strict host checking for this pull only
+    if GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git pull; then
         log_info "Dotfiles repository updated"
         return 0
     else
@@ -469,8 +470,10 @@ sync_dotfiles() {
             log_warn "Local changes to host files would be overwritten by pull."
             log_info "Attempting auto-stash and reapply..."
             
-            # Try auto-stash, pull, pop approach
-            if git stash && git pull && git stash pop; then
+            # Try auto-stash, pull, pop approach with the same SSH command
+            if git stash && \
+               GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git pull && \
+               git stash pop; then
                 log_info "Successfully pulled changes and reapplied local modifications"
                 return 0
             else
