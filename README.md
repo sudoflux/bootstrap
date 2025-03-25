@@ -40,11 +40,13 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 
 The bootstrap script can now configure your network settings to include a search domain, making it easier to access machines on your local network by hostname without specifying the domain:
 
+Set up everything with "lab" as the search domain:
 ```bash
-# Set up everything with "lab" as the search domain
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- -d
+```
 
-# Specify a custom search domain
+Specify a custom search domain:
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- -d mydomain.local
 ```
 
