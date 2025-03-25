@@ -5,6 +5,8 @@ set -e
 # Set global variables
 VERBOSE=false
 FORCE_UPDATE=false
+SEARCH_DOMAIN="lab"
+CONFIGURE_SEARCH_DOMAIN=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -21,6 +23,9 @@ print_banner() {
     echo "- Set up SSH keys (if missing)"
     echo "- Clone or update dotfiles repository"
     echo "- Configure SSH server for incoming connections"
+    if [ "$CONFIGURE_SEARCH_DOMAIN" = true ]; then
+        echo "- Configure DNS search domain: $SEARCH_DOMAIN"
+    fi
     echo ""
 }
 
@@ -87,12 +92,24 @@ parse_args() {
                 FORCE_UPDATE=true
                 shift
                 ;;
+            -d|--domain)
+                CONFIGURE_SEARCH_DOMAIN=true
+                # If a domain value is provided, use it
+                if [ -n "$2" ] && [[ "$2" != -* ]]; then
+                    SEARCH_DOMAIN="$2"
+                    shift 2
+                else
+                    # Otherwise, use the default value
+                    shift
+                fi
+                ;;
             -h|--help)
                 echo "Usage: $0 [options]"
                 echo ""
                 echo "Options:"
                 echo "  -v, --verbose     Enable verbose output"
                 echo "  -f, --force       Force update of packages and configurations"
+                echo "  -d, --domain      Configure DNS search domain (default: \"lab\")"
                 echo "  -h, --help        Show this help message"
                 exit 0
                 ;;
@@ -632,6 +649,94 @@ setup_ssh_server() {
     log_info "  ssh $SANITIZED_HOSTNAME"
 }
 
+# Configure DNS search domain for better network discovery
+configure_search_domain() {
+    if [ "$CONFIGURE_SEARCH_DOMAIN" != true ]; then
+        return
+    fi
+
+    log_step "Configuring DNS search domain: $SEARCH_DOMAIN"
+    
+    # Different approaches based on OS and tools available
+    if [ "$OS_TYPE" == "linux" ]; then
+        # Check for systemd-resolved first
+        if command -v resolvectl &> /dev/null && systemctl is-active --quiet systemd-resolved; then
+            log_info "Using systemd-resolved to configure search domain"
+            # Get the current network interface
+            INTERFACE=$(ip -o -4 route show to default | awk '{print $5}' | head -n1)
+            if [ -n "$INTERFACE" ]; then
+                log_info "Setting search domain $SEARCH_DOMAIN on interface $INTERFACE"
+                sudo resolvectl domain "$INTERFACE" "$SEARCH_DOMAIN"
+                sudo resolvectl dnssec "$INTERFACE" no
+                log_info "Search domain configured via systemd-resolved"
+            else
+                log_warn "Could not determine network interface"
+            fi
+        # Check for NetworkManager
+        elif command -v nmcli &> /dev/null && systemctl is-active --quiet NetworkManager; then
+            log_info "Using NetworkManager to configure search domain"
+            # Get the active connection
+            CONN=$(nmcli -t -f NAME c show --active | head -n1)
+            if [ -n "$CONN" ]; then
+                log_info "Setting search domain $SEARCH_DOMAIN on connection $CONN"
+                sudo nmcli connection modify "$CONN" ipv4.dns-search "$SEARCH_DOMAIN"
+                sudo systemctl restart NetworkManager
+                log_info "Search domain configured via NetworkManager"
+            else
+                log_warn "No active NetworkManager connection found"
+            fi
+        # Fallback to direct resolv.conf modification
+        else
+            log_info "Using direct resolv.conf modification to configure search domain"
+            # Backup existing resolv.conf
+            sudo cp /etc/resolv.conf /etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)
+            
+            # Check if resolv.conf already has a search line
+            if grep -q "^search" /etc/resolv.conf; then
+                # Update existing search line
+                log_info "Updating existing search line in resolv.conf"
+                sudo sed -i "s/^search.*/search $SEARCH_DOMAIN/" /etc/resolv.conf
+            else
+                # Add new search line
+                log_info "Adding search line to resolv.conf"
+                echo "search $SEARCH_DOMAIN" | sudo tee -a /etc/resolv.conf > /dev/null
+            fi
+            
+            # Make resolv.conf immutable to prevent other services from changing it
+            if [ "$FORCE_UPDATE" = true ]; then
+                log_info "Making resolv.conf immutable (--force enabled)"
+                sudo chattr +i /etc/resolv.conf
+            fi
+            
+            log_info "Search domain configured via direct resolv.conf modification"
+        fi
+    elif [ "$OS_TYPE" == "macos" ]; then
+        log_info "Configuring search domain on macOS"
+        # Get active network service
+        NETWORK_SERVICE=$(networksetup -listallnetworkservices | grep -v "*" | head -n1)
+        if [ -n "$NETWORK_SERVICE" ]; then
+            log_info "Setting search domain for $NETWORK_SERVICE"
+            sudo networksetup -setsearchdomains "$NETWORK_SERVICE" "$SEARCH_DOMAIN"
+            log_info "Search domain configured on macOS"
+        else
+            log_warn "Could not determine active network service on macOS"
+        fi
+    elif [ "$OS_TYPE" == "windows" ]; then
+        log_warn "DNS search domain configuration not implemented for Windows"
+        log_info "To configure the search domain on Windows:"
+        log_info "1. Open Network & Internet settings"
+        log_info "2. Click on Change adapter options"
+        log_info "3. Right-click on your active connection and select Properties"
+        log_info "4. Double-click on Internet Protocol Version 4 (TCP/IPv4)"
+        log_info "5. Click Advanced and then the DNS tab"
+        log_info "6. Add '$SEARCH_DOMAIN' to the 'Append these DNS suffixes'"
+    fi
+    
+    log_info "DNS search domain configuration complete"
+    log_info "You can now use hostnames without specifying the domain"
+    log_info "Example: ssh server1 instead of ssh server1.$SEARCH_DOMAIN"
+}
+
 # Main function
 main() {
     # Parse command line arguments
@@ -646,6 +751,7 @@ main() {
     setup_ssh_keys
     setup_dotfiles
     setup_ssh_server
+    configure_search_domain
     
     log_step "Bootstrap Complete"
     log_info "Your system has been set up with:"
@@ -653,6 +759,9 @@ main() {
     log_info "- SSH keys for GitHub and general use"
     log_info "- Dotfiles from https://github.com/sudoflux/dotfiles"
     log_info "- SSH server for incoming connections"
+    if [ "$CONFIGURE_SEARCH_DOMAIN" = true ]; then
+        log_info "- DNS search domain for local network resolution"
+    fi
     log_info ""
     log_info "Remember to add your GitHub SSH key to your GitHub account!"
     log_info ""
