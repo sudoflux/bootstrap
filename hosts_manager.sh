@@ -831,22 +831,82 @@ distribute_ssh_keys() {
             # Using common SSH options to avoid prompts
             local ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=no -o ConnectTimeout=10"
             
+            local key_copied=false
+            
+            # First attempt with primary IP
             if command -v ssh-copy-id &> /dev/null; then
                 # Use ssh-copy-id if available
                 if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip"; then
-                    log_info "Successfully copied key to $hostname"
+                    log_info "Successfully copied key to $hostname using primary IP"
+                    key_copied=true
                     success_count=$((success_count + 1))
                 else
-                    log_error "Failed to copy key to $hostname"
-                    failed_hosts+=("$hostname")
+                    log_warn "Failed to copy key to $hostname using primary IP, will try aliases if available"
+                    # Continue to aliases below
                 fi
             else
                 # Alternative method if ssh-copy-id is not available
                 if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
-                    log_info "Successfully copied key to $hostname"
+                    log_info "Successfully copied key to $hostname using primary IP"
+                    key_copied=true
                     success_count=$((success_count + 1))
                 else
-                    log_error "Failed to copy key to $hostname"
+                    log_warn "Failed to copy key to $hostname using primary IP, will try aliases if available"
+                    # Continue to aliases below
+                fi
+            fi
+            
+            # If primary IP failed, try all aliases for this host
+            if [ "$key_copied" = false ]; then
+                # Find all IP aliases for this hostname in the config file
+                local alias_count=1
+                local alias_found=true
+                
+                while [ "$alias_found" = true ]; do
+                    local alias_hostname="${hostname}-ip${alias_count}"
+                    local alias_ip=$(grep -A2 "Host ${alias_hostname}$" "$host_file" | grep "HostName" | awk '{print $2}')
+                    
+                    if [ -n "$alias_ip" ]; then
+                        # Skip WSL IPs
+                        if is_wsl_ip "$alias_ip"; then
+                            log_warn "Skipping WSL IP alias: $alias_ip"
+                            alias_count=$((alias_count + 1))
+                            continue
+                        fi
+                        
+                        log_info "Trying IP alias $alias_count: $username@$alias_hostname ($alias_ip)..."
+                        
+                        # Try to pre-accept the host key for the alias
+                        ssh-keyscan -H "$alias_ip" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+                        
+                        # Attempt to copy key using this alias
+                        if command -v ssh-copy-id &> /dev/null; then
+                            if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$alias_ip"; then
+                                log_info "Successfully copied key to $hostname using alias $alias_hostname"
+                                key_copied=true
+                                success_count=$((success_count + 1))
+                                break
+                            fi
+                        else
+                            if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$alias_ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
+                                log_info "Successfully copied key to $hostname using alias $alias_hostname"
+                                key_copied=true
+                                success_count=$((success_count + 1))
+                                break
+                            fi
+                        fi
+                        
+                        # Move to next alias
+                        alias_count=$((alias_count + 1))
+                    else
+                        # No more aliases found
+                        alias_found=false
+                    fi
+                done
+                
+                # If still failed after trying all aliases
+                if [ "$key_copied" = false ]; then
+                    log_error "Failed to copy key to $hostname (tried primary IP and all aliases)"
                     failed_hosts+=("$hostname")
                 fi
             fi
