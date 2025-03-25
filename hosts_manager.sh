@@ -815,9 +815,25 @@ distribute_ssh_keys() {
             # Attempt to copy SSH key
             log_info "Copying SSH key to $username@$hostname ($ip)..."
             
+            # Create known_hosts backup
+            local known_hosts="$HOME/.ssh/known_hosts"
+            local known_hosts_backup=""
+            if [ -f "$known_hosts" ]; then
+                known_hosts_backup="$known_hosts.backup.$(date +%s)"
+                cp "$known_hosts" "$known_hosts_backup"
+                log_debug "Created backup of known_hosts at $known_hosts_backup"
+            fi
+            
+            # Try to pre-accept the host key without prompting
+            log_debug "Pre-accepting host key for $hostname ($ip)"
+            ssh-keyscan -H "$ip" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+            
+            # Using common SSH options to avoid prompts
+            local ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=no -o ConnectTimeout=10"
+            
             if command -v ssh-copy-id &> /dev/null; then
                 # Use ssh-copy-id if available
-                if ssh-copy-id -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip"; then
+                if ssh-copy-id $ssh_opts -i "$HOME/.ssh/id_ed25519.pub" "$username@$ip"; then
                     log_info "Successfully copied key to $hostname"
                     success_count=$((success_count + 1))
                 else
@@ -826,7 +842,7 @@ distribute_ssh_keys() {
                 fi
             else
                 # Alternative method if ssh-copy-id is not available
-                if cat "$HOME/.ssh/id_ed25519.pub" | ssh "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
+                if cat "$HOME/.ssh/id_ed25519.pub" | ssh $ssh_opts "$username@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
                     log_info "Successfully copied key to $hostname"
                     success_count=$((success_count + 1))
                 else
