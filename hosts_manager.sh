@@ -69,12 +69,29 @@ get_windows_host_ip() {
     echo "$win_ip"
 }
 
+# Detect if a hostname appears to be a WSL system
+is_wsl_hostname() {
+    local hostname="$1"
+    
+    # Common naming patterns for WSL instances
+    if [[ "$hostname" == *desktop* ]] || 
+       [[ "$hostname" == *laptop* ]] || 
+       [[ "$hostname" == *windows* ]] || 
+       [[ "$hostname" == *wsl* ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if an IP appears to be from WSL ranges
 is_wsl_ip() {
     local ip="$1"
     
     # Check if IP is in WSL ranges
     if [[ "$ip" == 172.1[6-9].* ]] || [[ "$ip" == 172.2[0-9].* ]] || 
-       [[ "$ip" == 172.3[0-1].* ]] || [[ "$ip" == 10.255.255.* ]]; then
+       [[ "$ip" == 172.3[0-1].* ]] || [[ "$ip" == 10.255.255.* ]] ||
+       [[ "$ip" == 192.168.1.1 ]]; then # Common router IP often incorrectly detected
         return 0
     else
         return 1
@@ -807,6 +824,13 @@ distribute_ssh_keys() {
             # Skip current host
             if [ "$hostname" = "$CURRENT_HOST_SANITIZED" ]; then
                 log_info "Skipping current host: $hostname"
+                continue
+            fi
+            
+            # Skip WSL hosts entirely based on hostname
+            if is_wsl_hostname "$hostname"; then
+                log_info "Skipping WSL host: $hostname"
+                log_debug "WSL hosts are skipped during key distribution as they typically use internal IPs"
                 continue
             fi
             
