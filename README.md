@@ -54,6 +54,20 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 
 Your hosts will automatically stay in sync daily, so when you add a new machine, all existing machines will be able to connect to it within 24 hours.
 
+### 🔄 Best Practices for Multiple Machines
+
+When managing multiple machines, follow these steps to prevent conflicts:
+
+```bash
+# 1. First, update without registering to get the latest changes
+~/dotfiles/hosts_manager.sh --update-only
+
+# 2. Only after that succeeds, register your host
+~/dotfiles/hosts_manager.sh
+```
+
+This two-step approach ensures you don't create conflicting changes when configuring multiple machines at the same time.
+
 ## 🛠 Advanced Options
 
 ### Bootstrap Script Options
@@ -75,6 +89,7 @@ hosts_manager.sh [options]
   --auto-sync     Set up a daily cron job to keep hosts in sync
   --setup-cron    Set up cron job only (no other actions)
   --remove-cron   Remove the auto-sync cron job
+  -f, --force-ssh-config  Force update SSH config even if already included
   --verbose       Enable verbose output
   --help          Show help message
 ```
@@ -99,6 +114,33 @@ The SSH Hosts Manager is carefully designed with security in mind:
 - ✅ Host configurations are stored in a dedicated `ssh_hosts` directory, not in `.ssh`
 - ✅ Automatically manages `.gitignore` to protect sensitive files 
 - ✅ Sets proper file permissions (600) on SSH configuration files
+
+## 🔍 Troubleshooting
+
+### Handling Merge Conflicts
+
+If you see a merge conflict when running the script, it means two machines updated the hosts file at the same time. To resolve:
+
+1. Edit the conflicted file (usually `~/dotfiles/ssh_hosts/hosts`)
+2. Keep all host entries from both sides of the conflict
+3. Remove the conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+4. Save and commit:
+   ```bash
+   git add ssh_hosts/hosts
+   git commit -m "Merge hosts from multiple machines"
+   git push
+   ```
+
+### Fixing SSH Config Issues
+
+If SSH isn't recognizing your host configurations:
+
+```bash
+# Force update of your SSH config
+~/dotfiles/hosts_manager.sh -f
+```
+
+This will ensure the correct Include directive is in your SSH config file.
 
 ## 📝 License
 
