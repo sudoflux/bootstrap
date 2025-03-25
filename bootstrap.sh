@@ -717,7 +717,7 @@ main() {
     log_info "Remember to add your GitHub SSH key to your GitHub account!"
     log_info ""
     log_info "For seamless SSH access between all your machines, run:"
-    log_info "bash -c \"$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)\""
+    log_info "curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh | bash"
     log_info ""
     log_info "System information for UDM configuration:"
     log_info "- Hostname: $HOSTNAME"
