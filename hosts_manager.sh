@@ -180,7 +180,7 @@ register_host() {
     if [ "$UPDATE_ONLY" = true ]; then
         log_info "Update-only mode: Skipping host registration"
         return
-    }
+    fi
     
     log_step "Registering this host in your dotfiles"
     
@@ -283,7 +283,7 @@ commit_changes() {
     if [ "$UPDATE_ONLY" = true ] && [ "$VERBOSE" != true ]; then
         # Skip verbose output in update-only mode unless verbose is enabled
         return
-    }
+    fi
     
     log_step "Committing changes to dotfiles repository"
     
@@ -536,7 +536,7 @@ two_phase_sync() {
     if [ "$SKIP_PULL_PHASE" = true ]; then
         log_warn "Skipping pull phase as requested (not recommended)"
         return
-    }
+    fi
 
     # Phase 1: Update only
     log_step "Phase 1: Pull-only to get latest changes"
