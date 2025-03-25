@@ -80,6 +80,9 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 
 # Set up automatic sync
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
+
+# Common use case: Distribute keys and set up auto-sync in one command
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys --auto-sync
 ```
 
 2. **If you prefer using the local copy:**
@@ -102,6 +105,20 @@ This will:
 4. Enable passwordless SSH access from this machine to others
 
 You don't need to run bootstrap again - just this one command will handle the key distribution.
+
+### Quick Setup (Common Workflow)
+
+For new machines, the most common workflow is to distribute SSH keys for passwordless access and enable automatic daily syncing:
+
+```bash
+# All-in-one setup: distribute SSH keys and enable daily automatic syncing
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys --auto-sync
+```
+
+This single command:
+1. Copies your SSH key to all other registered hosts enabling passwordless login
+2. Sets up a daily cron job that keeps your hosts file in sync across all machines
+3. Shows a summary of successful and failed key distributions
 
 ### Options
 
