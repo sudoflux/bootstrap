@@ -161,3 +161,7 @@ Feel free to fork this repository and customize the bootstrap script to your nee
 - Modify SSH key settings
 - Change dotfiles repository location
 - Adjust SSH server security settings
+
+## License
+
+MIT
