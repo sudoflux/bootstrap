@@ -1,136 +1,127 @@
-# 🚀 Bootstrap
+# Bootstrap Script
 
-A powerful bootstrap system to set up new machines with your preferred configuration and keep them seamlessly connected.
+A comprehensive script to bootstrap new Linux, macOS, and WSL environments with my preferred configuration and tools.
 
-## ✨ Features
+## Features
 
-- 🔍 Detects operating system and installs essential packages
-- 🔑 Sets up SSH keys (both for GitHub and general use)
-- 📂 Clones and installs dotfiles
-- 🔌 Configures SSH server
-- 🌐 Provides UDM configuration information
-- 🔄 Keeps SSH hosts in sync across all your machines
-- 🛡️ Maintains security by never sharing private keys
-- 🚫 Prevents merge conflicts with automatic two-phase sync
+- **System Updates**: Installs and updates essential system packages
+- **SSH Keys**: Generates new SSH keys for GitHub and general use
+- **Dotfiles**: Clones and sets up my personal dotfiles repository
+- **SSH Server**: Configures the SSH server for remote access
+- **Host Management**: Easy SSH access between machines with the hosts_manager.sh script
 
-## 📋 Usage
+## Usage
 
-### 🚀 Basic Setup
-
-To bootstrap a new machine, run:
+### One-line Setup
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)"
 ```
 
-### 🔄 SSH Hosts Manager
+### Options
 
-To enable seamless SSH access between all your machines:
+- `-v, --verbose`: Enable verbose output
+- `-f, --force`: Force update of packages and configurations
+- `-h, --help`: Show help message
 
-1. Run the bootstrap script on each machine first
-2. Then run the hosts manager script:
+## Host Manager
 
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
-```
+The `hosts_manager.sh` script allows you to manage SSH hosts across your machines.
 
-This will:
-- ✅ Run a two-phase sync process that first pulls all hosts, then registers your machine
-- 📝 Add the current machine to your central SSH hosts configuration
-- 🔄 Sync the configuration with all your other machines
-- 🔑 Allow you to SSH between machines using just the hostname (e.g., `ssh ubuntu-dev`)
-- 🛡️ Maintain proper security by never sharing private keys
+### Features
 
-### 🕒 Automatic Host Synchronization
+- **Host Registration**: Automatically registers the current machine in your dotfiles
+- **Centralized Config**: Generates a combined hosts file for all registered machines
+- **SSH Configuration**: Updates your SSH config for seamless connectivity
+- **Two-Phase Sync**: Automatic conflict prevention with pull-before-push strategy
+- **Auto-sync**: Optional cron job setup for daily updates
 
-Keep your SSH hosts automatically in sync with a daily cron job:
+### Usage
 
-```bash
-# Enable automatic synchronization
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
-
-# Or if already installed:
-~/dotfiles/hosts_manager.sh --auto-sync
-```
-
-The cron job uses a randomized minute offset to prevent sync conflicts between machines. Your hosts will automatically stay in sync daily, so when you add a new machine, all existing machines will be able to connect to it within 24 hours.
-
-## 🛠 Advanced Options
-
-### Bootstrap Script Options
+After running the bootstrap script, set up host management with:
 
 ```bash
-bootstrap.sh [options]
-  --force         Force recreation of SSH config
-  --no-ssh        Skip SSH setup
-  --no-dotfiles   Skip dotfiles setup
-  --no-packages   Skip package installation
-  --help          Show help message
+curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh | bash
 ```
 
-### Hosts Manager Options
+Or if you've already run bootstrap:
 
 ```bash
-hosts_manager.sh [options]
-  --update-only       Only update hosts from repository (don't register this host)
-  --auto-sync         Set up a daily cron job to keep hosts in sync
-  --setup-cron        Set up cron job only (no other actions)
-  --remove-cron       Remove the auto-sync cron job
-  -f, --force-ssh-config  Force update SSH config even if already included
-  --skip-pull-phase   Skip the initial pull-only phase (not recommended)
-  --verbose           Enable verbose output
-  --help              Show help message
+~/dotfiles/hosts_manager.sh
 ```
 
-## 🤔 Why Use This?
+### Options
 
-- **🚀 Fast setup**: Get a new machine configured quickly
-- **🔄 Consistency**: Same configuration across all your machines
-- **✨ Convenience**: Simplified SSH between all your systems
-- **🔌 Integration**: Built-in support for UDM/UDM Pro/UDM SE configurations
-- **🛡️ Security**: Stores host configurations in the secure `ssh_hosts` directory, completely separate from your private keys
-- **📊 Scalability**: Works great with 2 machines or 20+ machines
-- **🔁 Idempotent**: Safe to run multiple times
-- **🧰 Adaptable**: Works on Linux, macOS, and even in special environments like Proxmox
-- **🚫 Conflict-Free**: Automatic two-phase sync prevents merge conflicts
+- `-u, --update-only`: Only update hosts from repository (don't register this host)
+- `-a, --auto-sync`: Set up a daily cron job to keep hosts in sync
+- `-f, --force-ssh-config`: Force updating the SSH config
+- `--setup-cron`: Set up cron job only (no other actions)
+- `--remove-cron`: Remove the auto-sync cron job
+- `--skip-pull-phase`: Skip the initial pull-only phase (not recommended)
 
-## 🔒 Security Details
+### Best Practices for Multiple Machines
 
-The SSH Hosts Manager is carefully designed with security in mind:
+The script now includes automatic two-phase synchronization to prevent conflicts when managing multiple machines:
 
-- ✅ Private SSH keys are **never** shared or stored in the repository
-- ✅ Only connection information (hostnames, IP addresses, usernames) is synchronized
-- ✅ Host configurations are stored in a dedicated `ssh_hosts` directory, not in `.ssh`
-- ✅ Automatically manages `.gitignore` to protect sensitive files 
-- ✅ Sets proper file permissions (600) on SSH configuration files
+1. It will automatically pull the latest changes first
+2. Then register the current host and push changes
 
-## 🔍 Troubleshooting
+This happens automatically with a single command:
 
-### Handling Merge Conflicts
+```bash
+~/dotfiles/hosts_manager.sh
+```
 
-The script now uses a two-phase sync process that should prevent most merge conflicts. If you still encounter a conflict, it means multiple machines made changes simultaneously. To resolve:
+### Important Note on SSH Keys and Passwordless Authentication
 
-1. Edit the conflicted file (usually `~/dotfiles/ssh_hosts/hosts`)
-2. Keep all host entries from both sides of the conflict
-3. Remove the conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
-4. Save and commit:
+The hosts_manager.sh script manages host configurations (IP addresses, usernames, etc.) but **does not** automatically transfer SSH keys between machines for security reasons. To enable passwordless SSH between your machines, you need to manually copy your public keys to each remote server's authorized_keys file:
+
+```bash
+# The easiest way (if ssh-copy-id is available)
+ssh-copy-id hostname
+
+# Alternative method
+cat ~/.ssh/id_ed25519.pub | ssh hostname "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+You'll need to do this once from each client machine to each server you want to connect to. After this step, you can SSH between machines without entering passwords.
+
+### Troubleshooting
+
+#### Resolving Merge Conflicts
+
+If you encounter merge conflicts in the hosts file:
+
+1. View the conflict:
    ```bash
+   cat ~/dotfiles/ssh_hosts/hosts
+   ```
+
+2. Edit the file to resolve conflicts:
+   ```bash
+   nano ~/dotfiles/ssh_hosts/hosts
+   ```
+   Remove conflict markers and keep both host entries.
+
+3. Commit the resolved conflict:
+   ```bash
+   cd ~/dotfiles
    git add ssh_hosts/hosts
-   git commit -m "Merge hosts from multiple machines"
+   git commit -m "Resolve hosts merge conflict"
    git push
    ```
 
-### Fixing SSH Config Issues
+4. Run hosts_manager again:
+   ```bash
+   ~/dotfiles/hosts_manager.sh
+   ```
 
-If SSH isn't recognizing your host configurations:
+#### SSH Config Issues
+
+If your SSH config doesn't include the hosts file:
 
 ```bash
-# Force update of your SSH config
 ~/dotfiles/hosts_manager.sh -f
 ```
 
-This will ensure the correct Include directive is in your SSH config file.
-
-## 📝 License
-
-MIT
+This forces an update of your SSH config with the correct Include line.
