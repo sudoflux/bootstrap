@@ -4,19 +4,12 @@ A cross-platform system bootstrap script that automatically sets up a new system
 
 ## Features
 
-- Detects operating system and installs appropriate packages
-- Installs essential development tools:
-  - curl
-  - git
-  - build-essential (or equivalent)
-  - python3
-  - python3-pip
-  - openssh-server (for remote access)
-- Clones your dotfiles repository
-- Sets up SSH keys for GitHub and general use
-- Configures SSH server for remote access
-- Adds machine hostname to SSH config for easy connections
-- Provides information for Ubiquiti UDM configuration
+- **Idempotent Design**: Safely run multiple times without disrupting existing systems
+- **Smart Detection**: Only installs or updates what's needed
+- **Preservation**: Preserves local changes and configurations
+- **Force Option**: Can force updates when needed with `--force` flag
+- **Cross-Platform**: Works on Linux, macOS, and Windows (with limitations)
+- **UDM Integration**: Provides information for Ubiquiti UDM configuration
 
 ## Supported Operating Systems
 
@@ -35,7 +28,7 @@ Run this command to download and execute the bootstrap script:
 curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh | bash
 ```
 
-Or download and run manually:
+Or download and run manually with options:
 
 ```bash
 # Download the script
@@ -44,35 +37,60 @@ curl -O https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh
 # Make it executable
 chmod +x bootstrap.sh
 
-# Run it
-./bootstrap.sh
+# Run with options
+./bootstrap.sh --verbose --force
 ```
+
+## Command Line Options
+
+The script supports several command line options:
+
+- **`-v, --verbose`**: Enable verbose output for detailed logging
+- **`-f, --force`**: Force update of packages and configurations, even if they appear up-to-date
+- **`-h, --help`**: Display help information
+
+## Failsafe Design
+
+The bootstrap script is designed to be idempotent - you can safely run it multiple times on the same system without causing problems:
+
+1. **Checks Before Changes**: The script checks the current state before making any changes
+2. **Minimal Updates**: Only missing or outdated components are updated
+3. **Change Detection**: Detects local changes in dotfiles and preserves them by default
+4. **Backup Creation**: Creates backups when replacing existing content
+5. **Force Option**: The `--force` flag allows you to override safeguards when needed
 
 ## What It Does
 
-1. **System Update**: Updates system packages based on your OS
-2. **Essential Tools**: Installs development tools (curl, git, build tools, Python)
-3. **Dotfiles**: Clones https://github.com/sudoflux/dotfiles to ~/dotfiles and runs the installer
-4. **SSH Setup**:
-   - Creates GitHub SSH key (if it doesn't exist)
-   - Creates general SSH key (if it doesn't exist)
-   - Configures SSH settings for security and convenience
-5. **SSH Server Configuration**:
-   - Installs and enables SSH server
-   - Configures system for incoming SSH connections
-   - Adds the machine's hostname to SSH config for easy access
-6. **UDM Integration**:
-   - Displays system information for configuring DNS in Ubiquiti UDM
-   - Shows IP addresses and hostname for easy reference
+The script follows these steps, each with built-in safeguards:
+
+1. **System Update**:
+   - Checks for missing packages before updating repositories
+   - Only upgrades system packages when using `--force`
+   - Installs only missing essential tools
+
+2. **Dotfiles**:
+   - Detects existing dotfiles repository and updates it
+   - Preserves local changes in dotfiles (can override with `--force`)
+   - Creates backups when necessary
+
+3. **SSH Setup**:
+   - Only generates SSH keys if they don't exist
+   - Adds missing SSH config entries without disturbing existing ones
+   - Uses color-coded output to highlight important information
+
+4. **SSH Server Configuration**:
+   - Only enables SSH server if not already running
+   - Makes minimal necessary changes to SSH server configuration
+   - Updates IP-based entries in SSH config when using `--force`
 
 ## SSH Key Management
 
-The script generates two SSH keys:
+The script generates two SSH keys (only if they don't already exist):
 
 1. **GitHub SSH Key**: `~/.ssh/github_ed25519` (for GitHub authentication)
 2. **General SSH Key**: `~/.ssh/id_ed25519` (for general SSH connections)
 
-After running the script, remember to add the GitHub SSH key to your GitHub account at: https://github.com/settings/keys
+After running the script for the first time, remember to add your GitHub SSH key to your GitHub account at: https://github.com/settings/keys
 
 ## Ubiquiti UDM Integration
 
@@ -87,32 +105,34 @@ This script is designed to work well with a Ubiquiti UDM for DNS resolution:
    ssh hostname
    ```
 
-### Example UDM Configuration
+## Examples
 
-After running the script, you'll see output like:
+### First-time Setup
 
-```
-Machine information for UDM configuration:
-- Hostname: mydevmachine
-- Username: developer
-- IP addresses:
-  1. 192.168.1.50
-
-Add this machine to your UDM with:
-  Hostname: mydevmachine
-  IP: 192.168.1.50
+```bash
+# Basic setup with default options
+./bootstrap.sh
 ```
 
-Use this information to add a DNS record in your UDM.
+### Checking and Updating an Existing System
 
-## SSH Config Details
+```bash
+# Check for and apply only necessary updates
+./bootstrap.sh
 
-The script automatically adds entries to your SSH config (`~/.ssh/config`) for:
+# Force update all components
+./bootstrap.sh --force
 
-1. **Hostname-based access**: `ssh hostname`
-2. **IP-based access**: `ssh hostname-ip1`, `ssh hostname-ip2`, etc. (if multiple network interfaces)
+# Get detailed output during the update
+./bootstrap.sh --verbose
+```
 
-This makes it easy to connect to your machines even before configuring DNS in your UDM.
+### Using with CI/CD
+
+```bash
+# Non-interactive setup for CI environments
+./bootstrap.sh --force
+```
 
 ## Security Considerations
 
