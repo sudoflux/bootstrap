@@ -68,17 +68,40 @@ The `hosts_manager.sh` script allows you to manage SSH hosts across your machine
 
 ### Usage
 
-After running the bootstrap script, set up host management with:
+After running the bootstrap script, you can manage hosts in two ways:
 
+1. **Direct curl usage (recommended):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh | bash
+# Register and update hosts
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
+
+# Distribute SSH keys to all hosts
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
+
+# Set up automatic sync
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --auto-sync
 ```
 
-Or if you've already run bootstrap:
-
+2. **If you prefer using the local copy:**
 ```bash
 ~/dotfiles/hosts_manager.sh
 ```
+
+### SSH Key Distribution
+
+The easiest way to set up passwordless SSH between your machines is to use the `--distribute-keys` option. After you've bootstrapped a machine (meaning it has SSH keys and is registered in your dotfiles), you can distribute its SSH key to all other registered hosts with a single command:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- --distribute-keys
+```
+
+This will:
+1. Use your existing SSH key (created during bootstrap)
+2. Copy it to all other registered hosts
+3. Set up proper permissions on the remote machines
+4. Enable passwordless SSH access from this machine to others
+
+You don't need to run bootstrap again - just this one command will handle the key distribution.
 
 ### Options
 
@@ -102,32 +125,14 @@ The script includes automatic two-phase synchronization to prevent conflicts whe
 This happens automatically with a single command:
 
 ```bash
-~/dotfiles/hosts_manager.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
 ```
-
-### SSH Key Distribution
-
-The hosts manager now includes automatic SSH key distribution to make setting up passwordless authentication between your machines easier:
-
-```bash
-# Distribute your SSH key to all registered hosts
-~/dotfiles/hosts_manager.sh --distribute-keys
-```
-
-This will:
-1. Check for your SSH public key (`~/.ssh/id_ed25519.pub`)
-2. Attempt to copy it to each registered host
-3. Use multiple methods to ensure successful key distribution:
-   - First tries `ssh-copy-id` if available
-   - Falls back to manual key copying if needed
-4. Provides a detailed report of successful and failed attempts
-5. Offers guidance for manual key copying if any hosts fail
 
 ## 🔒 Security Notes
 
 ### SSH Keys and Passwordless Authentication
 
-The hosts_manager.sh script manages host configurations (IP addresses, usernames, etc.) and now includes automatic key distribution with the `--distribute-keys` option. When using this feature:
+The hosts_manager.sh script manages host configurations (IP addresses, usernames, etc.) and includes automatic key distribution with the `--distribute-keys` option. When using this feature:
 
 1. **Only the public key is distributed**: Your private key remains secure on your local machine
 2. **Multiple authentication methods**: Uses `ssh-copy-id` with fallback to manual methods
@@ -172,7 +177,7 @@ If you encounter merge conflicts in the hosts file:
 
 4. Run hosts_manager again:
    ```bash
-   ~/dotfiles/hosts_manager.sh
+   bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)"
    ```
 
 ### SSH Config Issues
@@ -180,7 +185,7 @@ If you encounter merge conflicts in the hosts file:
 If your SSH config doesn't include the hosts file:
 
 ```bash
-~/dotfiles/hosts_manager.sh -f
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh)" -- -f
 ```
 
 This forces an update of your SSH config with the correct Include line.
