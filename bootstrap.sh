@@ -297,35 +297,6 @@ install_packages() {
     fi
 }
 
-# Clone or update dotfiles repository
-clone_dotfiles() {
-    log_step "Cloning dotfiles repository"
-    
-    if [ -d "$HOME/dotfiles" ]; then
-        log_info "Dotfiles directory already exists at $HOME/dotfiles"
-        
-        # Check if it's a git repository
-        if [ -d "$HOME/dotfiles/.git" ]; then
-            log_info "It's a git repository - will update it later after SSH keys are set up"
-        else
-            log_warn "Directory exists but is not a git repository"
-            if [ "$FORCE_UPDATE" = true ]; then
-                log_warn "Backing up existing directory and cloning fresh"
-                mv "$HOME/dotfiles" "$HOME/dotfiles.backup.$(date +%Y%m%d%H%M%S)"
-                git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
-                log_info "Dotfiles repository cloned (old directory backed up)"
-            else
-                log_warn "Skipping dotfiles setup to preserve existing directory (use --force to override)"
-                return
-            fi
-        fi
-    else
-        log_info "Cloning dotfiles repository..."
-        git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
-        log_info "Dotfiles repository cloned"
-    fi
-}
-
 # Set up SSH keys and config for outgoing connections
 setup_ssh_keys() {
     log_step "Setting up SSH keys and configuration"
@@ -409,50 +380,86 @@ EOF
     fi
 }
 
-# Update dotfiles if they're already cloned and set up the dotfiles installation
-update_and_install_dotfiles() {
-    log_step "Updating and installing dotfiles"
+# Clone or update dotfiles repository and run the installer
+setup_dotfiles() {
+    log_step "Setting up dotfiles repository"
     
-    if [ -d "$HOME/dotfiles/.git" ]; then
-        cd "$HOME/dotfiles"
+    # Flag to track if dotfiles installer needs to be run
+    local run_installer=false
+    
+    if [ -d "$HOME/dotfiles" ]; then
+        log_info "Dotfiles directory already exists at $HOME/dotfiles"
         
-        # Check for local changes
-        if ! git diff --quiet; then
-            log_warn "Local changes detected in dotfiles repository"
-            if [ "$FORCE_UPDATE" = true ]; then
-                log_warn "Forcing update - stashing local changes"
-                git stash
-                git pull
-                log_info "Dotfiles repository updated (local changes stashed)"
+        # Check if it's a git repository
+        if [ -d "$HOME/dotfiles/.git" ]; then
+            log_info "Updating existing repository..."
+            cd "$HOME/dotfiles"
+            
+            # Check for local changes
+            if ! git diff --quiet; then
+                log_warn "Local changes detected in dotfiles repository"
+                if [ "$FORCE_UPDATE" = true ]; then
+                    log_warn "Forcing update - stashing local changes"
+                    git stash
+                    git pull
+                    log_info "Dotfiles repository updated (local changes stashed)"
+                    run_installer=true
+                else
+                    log_warn "Skipping update to preserve local changes (use --force to override)"
+                    # Still run the installer even if we didn't update
+                    run_installer=true
+                fi
             else
-                log_warn "Skipping update to preserve local changes (use --force to override)"
+                # No local changes, safe to pull
+                git pull
+                log_info "Dotfiles repository updated"
+                run_installer=true
             fi
         else
-            # No local changes, safe to pull
-            log_info "Updating dotfiles repository..."
-            git pull
-            log_info "Dotfiles repository updated"
+            log_warn "Directory exists but is not a git repository"
+            if [ "$FORCE_UPDATE" = true ]; then
+                log_warn "Backing up existing directory and cloning fresh"
+                mv "$HOME/dotfiles" "$HOME/dotfiles.backup.$(date +%Y%m%d%H%M%S)"
+                git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
+                log_info "Dotfiles repository cloned (old directory backed up)"
+                run_installer=true
+            else
+                log_warn "Skipping dotfiles setup to preserve existing directory (use --force to override)"
+            fi
+        fi
+    else
+        log_info "Cloning dotfiles repository..."
+        git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
+        log_info "Dotfiles repository cloned"
+        run_installer=true
+    fi
+    
+    # Run the dotfiles installer if needed
+    if [ "$run_installer" = true ]; then
+        if [ -f "$HOME/dotfiles/install_dotfiles.sh" ]; then
+            log_info "Running dotfiles installer..."
+            cd "$HOME/dotfiles"
+            
+            # Make the installer executable if it's not already
+            if [ ! -x "$HOME/dotfiles/install_dotfiles.sh" ]; then
+                log_info "Making installer executable..."
+                chmod +x "$HOME/dotfiles/install_dotfiles.sh"
+            fi
+            
+            # Run the installer
+            ./install_dotfiles.sh
+            log_info "Dotfiles installation completed"
+        else
+            log_error "Dotfiles installer not found at $HOME/dotfiles/install_dotfiles.sh"
+            log_warn "Skipping dotfiles installation"
         fi
     fi
     
-    # Run the dotfiles installer if it exists and is executable
-    if [ -f "$HOME/dotfiles/install_dotfiles.sh" ]; then
-        if [ -x "$HOME/dotfiles/install_dotfiles.sh" ]; then
-            log_info "Running dotfiles installer..."
-            cd "$HOME/dotfiles"
-            ./install_dotfiles.sh
-            log_info "Dotfiles installation completed"
-        else
-            log_warn "Dotfiles installer exists but is not executable"
-            log_info "Making installer executable..."
-            chmod +x "$HOME/dotfiles/install_dotfiles.sh"
-            cd "$HOME/dotfiles"
-            ./install_dotfiles.sh
-            log_info "Dotfiles installation completed"
-        fi
-    else
-        log_error "Dotfiles installer not found at $HOME/dotfiles/install_dotfiles.sh"
-        log_warn "Skipping dotfiles installation"
+    # Provide info about SSH key setup for future updates
+    if [ -f "$HOME/.ssh/github_ed25519" ] && [ -d "$HOME/dotfiles/.git" ]; then
+        log_info "To update dotfiles using SSH in the future, you can run:"
+        log_info "  cd ~/dotfiles && git remote set-url origin git@github.com:sudoflux/dotfiles.git"
+        log_info "But make sure you've added your SSH key to GitHub first!"
     fi
 }
 
@@ -687,12 +694,11 @@ main() {
     # Show banner
     print_banner
     
-    # Execute steps
+    # Execute steps in proper order
     detect_os
     install_packages
-    clone_dotfiles   # Just clone, don't install yet
-    setup_ssh_keys   # Set up SSH keys and config
-    update_and_install_dotfiles  # Now update and install dotfiles after SSH is configured
+    setup_ssh_keys   # Set up SSH keys and config first
+    setup_dotfiles   # Then handle dotfiles (but still use HTTPS)
     setup_ssh_server
     
     log_step "Bootstrap Complete"
