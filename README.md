@@ -11,6 +11,7 @@ A powerful bootstrap system to set up new machines with your preferred configura
 - 🌐 Provides UDM configuration information
 - 🔄 Keeps SSH hosts in sync across all your machines
 - 🛡️ Maintains security by never sharing private keys
+- 🚫 Prevents merge conflicts with automatic two-phase sync
 
 ## 📋 Usage
 
@@ -34,8 +35,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 ```
 
 This will:
-- ✅ Register the current machine in your dotfiles repository
-- 📝 Add it to a central SSH hosts configuration
+- ✅ Run a two-phase sync process that first pulls all hosts, then registers your machine
+- 📝 Add the current machine to your central SSH hosts configuration
 - 🔄 Sync the configuration with all your other machines
 - 🔑 Allow you to SSH between machines using just the hostname (e.g., `ssh ubuntu-dev`)
 - 🛡️ Maintain proper security by never sharing private keys
@@ -52,21 +53,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 ~/dotfiles/hosts_manager.sh --auto-sync
 ```
 
-Your hosts will automatically stay in sync daily, so when you add a new machine, all existing machines will be able to connect to it within 24 hours.
-
-### 🔄 Best Practices for Multiple Machines
-
-When managing multiple machines, follow these steps to prevent conflicts:
-
-```bash
-# 1. First, update without registering to get the latest changes
-~/dotfiles/hosts_manager.sh --update-only
-
-# 2. Only after that succeeds, register your host
-~/dotfiles/hosts_manager.sh
-```
-
-This two-step approach ensures you don't create conflicting changes when configuring multiple machines at the same time.
+The cron job uses a randomized minute offset to prevent sync conflicts between machines. Your hosts will automatically stay in sync daily, so when you add a new machine, all existing machines will be able to connect to it within 24 hours.
 
 ## 🛠 Advanced Options
 
@@ -85,13 +72,14 @@ bootstrap.sh [options]
 
 ```bash
 hosts_manager.sh [options]
-  --update-only   Only update hosts from repository (don't register this host)
-  --auto-sync     Set up a daily cron job to keep hosts in sync
-  --setup-cron    Set up cron job only (no other actions)
-  --remove-cron   Remove the auto-sync cron job
+  --update-only       Only update hosts from repository (don't register this host)
+  --auto-sync         Set up a daily cron job to keep hosts in sync
+  --setup-cron        Set up cron job only (no other actions)
+  --remove-cron       Remove the auto-sync cron job
   -f, --force-ssh-config  Force update SSH config even if already included
-  --verbose       Enable verbose output
-  --help          Show help message
+  --skip-pull-phase   Skip the initial pull-only phase (not recommended)
+  --verbose           Enable verbose output
+  --help              Show help message
 ```
 
 ## 🤔 Why Use This?
@@ -104,6 +92,7 @@ hosts_manager.sh [options]
 - **📊 Scalability**: Works great with 2 machines or 20+ machines
 - **🔁 Idempotent**: Safe to run multiple times
 - **🧰 Adaptable**: Works on Linux, macOS, and even in special environments like Proxmox
+- **🚫 Conflict-Free**: Automatic two-phase sync prevents merge conflicts
 
 ## 🔒 Security Details
 
@@ -119,7 +108,7 @@ The SSH Hosts Manager is carefully designed with security in mind:
 
 ### Handling Merge Conflicts
 
-If you see a merge conflict when running the script, it means two machines updated the hosts file at the same time. To resolve:
+The script now uses a two-phase sync process that should prevent most merge conflicts. If you still encounter a conflict, it means multiple machines made changes simultaneously. To resolve:
 
 1. Edit the conflicted file (usually `~/dotfiles/ssh_hosts/hosts`)
 2. Keep all host entries from both sides of the conflict
