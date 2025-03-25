@@ -13,6 +13,7 @@ UPDATE_ONLY=false
 CRON_SETUP=false
 CRON_UNINSTALL=false
 FORCE_SSH_CONFIG=false
+SKIP_PULL_PHASE=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -50,6 +51,10 @@ parse_args() {
                 FORCE_SSH_CONFIG=true
                 shift
                 ;;
+            --skip-pull-phase)
+                SKIP_PULL_PHASE=true
+                shift
+                ;;
             --setup-cron)
                 CRON_SETUP=true
                 shift
@@ -66,9 +71,10 @@ parse_args() {
                 echo "  -u, --update-only   Only update hosts from repository (don't register this host)"
                 echo "  -a, --auto-sync     Set up a daily cron job to keep hosts in sync"
                 echo "  -f, --force-ssh-config  Force updating the SSH config even if it seems to be included"
+                echo "  --skip-pull-phase   Skip the initial pull-only phase (not recommended)"
                 echo "  --setup-cron        Set up cron job only (no other actions)"
                 echo "  --remove-cron       Remove the auto-sync cron job"
-                echo "  -h, --help          Show this help message"
+                echo "  -h, --help          Show help message"
                 exit 0
                 ;;
             *)
@@ -413,10 +419,11 @@ setup_cron() {
     # Remove any existing cron entry first
     crontab -l 2>/dev/null | grep -v "hosts_manager.sh" | crontab -
     
-    # Add new cron job to run daily at 3:00 AM
-    (crontab -l 2>/dev/null; echo "0 3 * * * $SCRIPT_PATH --update-only >/dev/null 2>&1") | crontab -
+    # Add new cron job to run daily at a random minute between 3:00-3:59 AM to avoid conflicts
+    local random_minute=$((RANDOM % 60))
+    (crontab -l 2>/dev/null; echo "$random_minute 3 * * * $SCRIPT_PATH --update-only >/dev/null 2>&1") | crontab -
     
-    log_info "Auto-sync cron job set up to run daily at 3:00 AM"
+    log_info "Auto-sync cron job set up to run daily at 3:$random_minute AM"
     return 0
 }
 
@@ -447,9 +454,29 @@ sync_dotfiles() {
     
     if git pull; then
         log_info "Dotfiles repository updated"
+        return 0
     else
         log_warn "Failed to pull latest changes. Local changes may be present."
-        log_info "Consider manually running: cd $DOTFILES_DIR && git stash && git pull"
+        
+        # Check if this is due to uncommitted changes that would be overwritten
+        if git status --porcelain | grep -q "ssh_hosts/"; then
+            log_warn "Local changes to host files would be overwritten by pull."
+            log_info "Attempting auto-stash and reapply..."
+            
+            # Try auto-stash, pull, pop approach
+            if git stash && git pull && git stash pop; then
+                log_info "Successfully pulled changes and reapplied local modifications"
+                return 0
+            else
+                log_error "Auto-stash and reapply failed. Manual intervention required."
+                log_info "Consider manually running: cd $DOTFILES_DIR && git stash && git pull && git stash pop"
+                return 1
+            fi
+        else
+            log_warn "Pull failed for other reasons. Manual intervention may be required."
+            log_info "Consider manually running: cd $DOTFILES_DIR && git pull"
+            return 1
+        fi
     fi
 }
 
@@ -495,6 +522,47 @@ show_help_hints() {
     log_info ""
 }
 
+# Two-phase sync
+# Phase 1: Pull only to get latest changes
+# Phase 2: Register host and push changes
+two_phase_sync() {
+    # Skip the first phase if requested
+    if [ "$SKIP_PULL_PHASE" = true ]; then
+        log_warn "Skipping pull phase as requested (not recommended)"
+        return
+    fi
+
+    # Phase 1: Update only
+    log_step "Phase 1: Pull-only to get latest changes"
+    
+    # Save original value of UPDATE_ONLY
+    local original_update_only="$UPDATE_ONLY"
+    
+    # Force update-only for first phase
+    UPDATE_ONLY=true
+    
+    # Execute pull-only phase
+    cd "$DOTFILES_DIR"
+    if ! sync_dotfiles; then
+        log_error "Phase 1 failed: Could not sync with remote repository"
+        log_warn "Continuing with Phase 2, but conflicts may occur"
+    else
+        log_info "Phase 1 complete: Successfully synced with remote repository"
+    fi
+    
+    # Generate hosts file and update SSH config during Phase 1
+    generate_hosts_file
+    install_hosts
+    
+    # Restore original value for Phase 2
+    UPDATE_ONLY="$original_update_only"
+    
+    # Small delay to ensure phases are clearly separated
+    sleep 1
+    
+    log_step "Phase 2: Register host and push changes"
+}
+
 # Main function
 main() {
     # Parse command line arguments
@@ -521,6 +589,15 @@ main() {
     
     check_prereqs
     migrate_from_old_path
+    
+    # Run two-phase sync to prevent conflicts (unless in update-only mode)
+    if [ "$UPDATE_ONLY" != true ]; then
+        two_phase_sync
+    else
+        log_info "Running in update-only mode, skipping host registration"
+    fi
+    
+    # Normal sync flow continues
     sync_dotfiles
     register_host
     generate_hosts_file
