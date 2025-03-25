@@ -26,6 +26,7 @@ HOSTS_DIR="$DOTFILES_DIR/.ssh/hosts.d"
 HOSTS_FILE="$DOTFILES_DIR/.ssh/hosts"
 SSH_CONFIG="$HOME/.ssh/config"
 SCRIPT_PATH="$DOTFILES_DIR/hosts_manager.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/sudoflux/bootstrap/main/hosts_manager.sh"
 
 # Parse command line arguments
 parse_args() {
@@ -100,9 +101,10 @@ check_prereqs() {
     touch "$HOSTS_FILE"
     
     # Copy this script to dotfiles if it doesn't exist there
-    if [ ! -f "$SCRIPT_PATH" ] && [ -f "$0" ] && [ "$0" != "$SCRIPT_PATH" ]; then
-        log_info "Copying hosts_manager.sh to dotfiles for future use"
-        cp "$0" "$SCRIPT_PATH"
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        log_info "Installing hosts_manager.sh to dotfiles for future use"
+        # When running via curl, we need to download the script explicitly
+        curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"
         chmod +x "$SCRIPT_PATH"
     fi
     
@@ -227,7 +229,7 @@ commit_changes() {
         log_info "Changes detected, committing to dotfiles repository"
         
         # Stage the changes
-        git add "$HOSTS_DIR" "$HOSTS_FILE"
+        git add "$HOSTS_DIR" "$HOSTS_FILE" "$SCRIPT_PATH"
         
         # Commit with a descriptive message
         git commit -m "Update SSH hosts: add/update $SANITIZED_HOSTNAME"
@@ -296,14 +298,9 @@ setup_cron() {
     
     # Make sure the script exists in dotfiles
     if [ ! -f "$SCRIPT_PATH" ]; then
-        if [ -f "$0" ] && [ "$0" != "$SCRIPT_PATH" ]; then
-            log_info "Copying hosts_manager.sh to dotfiles for cron use"
-            cp "$0" "$SCRIPT_PATH"
-            chmod +x "$SCRIPT_PATH"
-        else
-            log_error "Cannot find hosts_manager.sh to set up cron job"
-            return 1
-        fi
+        log_info "Installing hosts_manager.sh to dotfiles for cron use"
+        curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"
+        chmod +x "$SCRIPT_PATH"
     fi
     
     # Remove any existing cron entry first
@@ -391,7 +388,7 @@ main() {
     log_info "Example: ssh $SANITIZED_HOSTNAME"
     echo ""
     log_info "On each new machine, after running bootstrap.sh, you can run:"
-    log_info "  $DOTFILES_DIR/hosts_manager.sh"
+    log_info "  $SCRIPT_PATH"
     log_info "to register that machine and get access to all other registered hosts"
     
     if [ "$AUTO_SYNC" = true ]; then
@@ -400,7 +397,7 @@ main() {
     else
         echo ""
         log_info "To enable automatic sync via cron, run:"
-        log_info "  $0 --auto-sync"
+        log_info "  $SCRIPT_PATH --auto-sync"
     fi
 }
 
