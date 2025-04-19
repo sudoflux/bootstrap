@@ -88,6 +88,9 @@ detect_os
 # ─── Install essential packages (excl. Neovim & Node.js) ──────────────────────
 install_packages() {
   step "Installing essential packages"
+  if is_wsl; then
+    debug "Running under WSL: installing packages as for $DISTRO"
+  fi
   case "$OS_TYPE" in
     linux)
       case "$DISTRO" in
@@ -98,9 +101,16 @@ install_packages() {
             openssh-server unzip
           ;;
         fedora|centos|rhel)
-          sudo dnf install -y \
-            curl git gcc gcc-c++ make python3 python3-pip \
-            openssh-server unzip
+          # Try dnf, fallback to yum for older systems
+          if command -v dnf &>/dev/null; then
+            sudo dnf install -y \
+              curl git gcc gcc-c++ make python3 python3-pip \
+              openssh-server unzip
+          else
+            sudo yum install -y \
+              curl git gcc gcc-c++ make python3 python3-pip \
+              openssh-server unzip
+          fi
           ;;
         arch)
           sudo pacman -Sy --noconfirm \
@@ -126,25 +136,123 @@ install_packages() {
   log "Essential packages installed"
 }
 
-# ─── Ensure Node.js (latest LTS) ──────────────────────────────────────────────
+# ─── Ensure Node.js (version 20.x) ────────────────────────────────────────────
 ensure_node() {
-  step "Ensuring Node.js (latest LTS)"
-  if [[ "$OS_TYPE" = "linux" ]]; then
-    # Check if node is installed and version is current LTS
-    if command -v node &>/dev/null; then
-      CURRENT_NODE=$(node --version | sed 's/^v//')
-      log "Node.js currently installed: v$CURRENT_NODE"
-    else
-      log "Node.js not found, installing latest LTS"
-      # NodeSource setup for latest LTS
-      curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-      sudo apt-get install -y nodejs
-      return
+  step "Ensuring Node.js (version 20.x)"
+
+  # Check for NVM first
+  NVM_DIR="$HOME/.nvm"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    log "NVM detected. Attempting to install/use Node.js 20 via NVM."
+    # Source nvm script to make nvm command available
+    \. "$NVM_DIR/nvm.sh" --no-use # Load nvm
+
+    # Check current NVM version
+    CURRENT_NVM_NODE=$(nvm current)
+    NODE_MAJOR="" # Initialize NODE_MAJOR
+    if [[ "$CURRENT_NVM_NODE" != "none" ]] && [[ "$CURRENT_NVM_NODE" != "system" ]]; then
+        # Parse version like v18.20.8
+        NODE_MAJOR=$(echo "$CURRENT_NVM_NODE" | sed 's/^v//' | cut -d. -f1)
     fi
-    # Always update to latest LTS
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt-get install -y nodejs
-    log "Node.js updated to: $(node --version)"
+
+    log "NVM current version: $CURRENT_NVM_NODE"
+
+    # Check if NODE_MAJOR is a number and >= 20
+    if [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] && (( NODE_MAJOR >= 20 )); then
+        log "NVM Node.js version ($CURRENT_NVM_NODE) is sufficient (>= 20)"
+        # Ensure it's the default
+        nvm alias default 20 > /dev/null 2>&1 || nvm alias default system > /dev/null 2>&1 # Try setting default
+        log "Set Node 20.x as default via NVM."
+        return
+    fi
+
+    log "Installing Node.js 20.x via NVM..."
+    nvm install 20 || error "NVM failed to install Node.js 20"
+    log "Setting Node.js 20.x as default via NVM..."
+    nvm alias default 20 || error "NVM failed to set default alias to 20"
+    log "Switching current shell to use Node.js 20.x via NVM..."
+    nvm use default > /dev/null # Use the newly set default
+
+    # Verify
+    hash -r
+    FINAL_NODE_VERSION=$(node --version 2>/dev/null)
+    log "Node.js version after NVM install: ${FINAL_NODE_VERSION:-'command failed'}"
+    FINAL_NODE_MAJOR=$(echo "$FINAL_NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+     if [[ -z "$FINAL_NODE_MAJOR" ]] || ! [[ "$FINAL_NODE_MAJOR" =~ ^[0-9]+$ ]] || (( FINAL_NODE_MAJOR < 20 )); then
+         warn "NVM Node.js version is still not >= 20 after installation attempt!"
+         warn "You may need to reload your shell profile (e.g., source ~/.bashrc) or restart your terminal."
+     fi
+     return # NVM handled it, skip system install
+  fi
+
+  # --- Fallback to System Installation (NodeSource) if NVM not found ---
+  log "NVM not detected. Proceeding with system-wide Node.js installation via NodeSource."
+
+  if [[ "$OS_TYPE" = "linux" ]]; then
+    # Remove any existing nodejs/npm from apt to avoid conflicts ONLY if NVM wasn't found
+    if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
+      log "Attempting to remove existing Node.js/npm from apt..."
+      sudo apt-get remove -y nodejs npm nodejs-dev || true
+      sudo apt-get autoremove -y || true
+    fi
+
+    # Check system node version (should be none now or irrelevant)
+    NODE_PATH=$(command -v node || echo "not_found")
+    if [[ "$NODE_PATH" != "not_found" && ! "$NODE_PATH" =~ \.nvm ]]; then # Check it's not an NVM path somehow
+      CURRENT_NODE=$(node --version 2>/dev/null | sed 's/^v//')
+      NODE_MAJOR=$(echo "$CURRENT_NODE" | cut -d. -f1)
+      log "System Node.js currently installed: v${CURRENT_NODE:-unknown} at $NODE_PATH"
+      if [[ -n "$NODE_MAJOR" ]] && (( NODE_MAJOR >= 20 )); then
+        log "System Node.js version is sufficient (>= 20)"
+        return
+      fi
+      log "System Node.js version is < 20 or unknown. Attempting upgrade/install."
+    else
+      log "System Node.js not found or is NVM path, installing Node.js 20.x via package manager."
+    fi
+
+    # Use the correct NodeSource script for the distro
+    case "$DISTRO" in
+      ubuntu|debian)
+        log "Setting up NodeSource repository for Node.js 20.x..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        log "Updating package list after adding NodeSource repo..."
+        sudo apt-get update -qq
+        log "Installing Node.js from NodeSource..."
+        sudo apt-get install -y nodejs
+        ;;
+      fedora|centos|rhel)
+        log "Setting up NodeSource repository for Node.js 20.x..."
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+        log "Installing Node.js from NodeSource..."
+        if command -v dnf &>/dev/null; then
+          sudo dnf install -y nodejs
+        else
+          sudo yum install -y nodejs
+        fi
+        ;;
+      *)
+        warn "Automatic Node.js 20.x install not supported for $DISTRO. Please install manually."
+        return # Skip final check if install wasn't attempted
+        ;;
+    esac
+
+    # Force hash table refresh and check final version/path
+    hash -r
+    NODE_PATH_AFTER=$(command -v node || echo "not_found")
+    if [[ "$NODE_PATH_AFTER" != "not_found" ]]; then
+        FINAL_NODE_VERSION=$(node --version 2>/dev/null)
+        log "Node.js path after install: $NODE_PATH_AFTER"
+        log "Node.js version after install: ${FINAL_NODE_VERSION:-'command failed'}"
+        # Final verification
+        FINAL_NODE_MAJOR=$(echo "$FINAL_NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+        if [[ -n "$FINAL_NODE_MAJOR" ]] && (( FINAL_NODE_MAJOR < 20 )); then
+             warn "Node.js version is still < 20 after installation attempt!"
+        fi
+    else
+        error "Node.js command not found after installation attempt!"
+    fi
+
   elif [[ "$OS_TYPE" = "macos" ]]; then
     if ! brew list node &>/dev/null; then
       brew install node
