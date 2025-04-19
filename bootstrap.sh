@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # System Bootstrap Script
-#  - Updates/installs essential tools (including Neovim ≥ 0.9)
-#  - Sets up SSH keys & config
-#  - Clones or updates your dotfiles & runs install_dotfiles.sh
+#  - Installs essential tools (curl, git, build tools, python3, pip, openssh-server)
+#  - Ensures Neovim ≥ 0.9 via the neovim-ppa/unstable channel
+#  - Sets up SSH keys & config for outgoing
+#  - Clones/updates your dotfiles & runs install_dotfiles.sh
 #  - Enables SSH server for incoming
 #  - Optionally configures a DNS search domain
 #
@@ -12,16 +13,13 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# ─── Configuration ────────────────────────────────────────────────────────────
+# ─── Configurable defaults ────────────────────────────────────────────────────
 VERBOSE=false
 FORCE=false
 CONFIGURE_SEARCH_DOMAIN=false
 SEARCH_DOMAIN="lab"
 
-# Prompt for sudo up front
-sudo -v
-
-# ─── Color Logging ─────────────────────────────────────────────────────────────
+# ─── Color Logging ────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()   { echo -e "${YELLOW}[WARN]${NC} $1"; }
@@ -34,9 +32,13 @@ while (( "$#" )); do
   case "$1" in
     -v|--verbose) VERBOSE=true; shift ;;
     -f|--force)   FORCE=true; shift ;;
-    -d|--domain)  
+    -d|--domain)
       CONFIGURE_SEARCH_DOMAIN=true
-      if [[ -n "${2-}" && "${2:0:1}" != "-" ]]; then SEARCH_DOMAIN="$2"; shift 2; else shift; fi
+      if [[ -n "${2-}" && "${2:0:1}" != "-" ]]; then
+        SEARCH_DOMAIN="$2"; shift 2
+      else
+        shift
+      fi
       ;;
     -h|--help)
       cat <<EOF
@@ -54,13 +56,16 @@ EOF
   esac
 done
 
+# ─── Sudo up front ────────────────────────────────────────────────────────────
+sudo -v
+
 # ─── Detect OS ────────────────────────────────────────────────────────────────
 detect_os() {
   step "Detecting operating system"
-  if   [[ -f /etc/os-release ]]; then
+  if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     OS_TYPE="linux"; DISTRO="$ID"
-    log "Linux distro detected: $DISTRO"
+    log "Linux distro: $DISTRO"
   elif [[ "$(uname)" == "Darwin" ]]; then
     OS_TYPE="macos"; DISTRO="macos"
     log "macOS detected"
@@ -73,36 +78,29 @@ detect_os() {
 }
 detect_os
 
-# ─── Install or Update Essential Packages ─────────────────────────────────────
+# ─── Install essential packages (excl. Neovim) ─────────────────────────────────
 install_packages() {
   step "Installing essential packages"
   case "$OS_TYPE" in
     linux)
       case "$DISTRO" in
         ubuntu|debian)
-          # Ensure PPA helper
-          sudo apt-get update -qq
-          sudo apt-get install -y software-properties-common
-
-          # Add Neovim PPA if missing or forced
-          if $FORCE || ! grep -q "^deb .*\bneovim-ppa/stable\b" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; then
-            log "Adding Neovim PPA"
-            sudo add-apt-repository -y ppa:neovim-ppa/stable
-          fi
-
           sudo apt-get update -qq
           sudo apt-get install -y \
             curl git build-essential python3 python3-pip \
-            openssh-server neovim
+            openssh-server
           ;;
         fedora|centos|rhel)
-          sudo dnf -y install curl git gcc gcc-c++ make python3 python3-pip openssh-server neovim
+          sudo dnf install -y \
+            curl git gcc gcc-c++ make python3 python3-pip \
+            openssh-server
           ;;
         arch)
-          sudo pacman -Sy --noconfirm curl git base-devel python python-pip openssh neovim
+          sudo pacman -Sy --noconfirm \
+            curl git base-devel python python-pip openssh
           ;;
         *)
-          warn "Please manually install: curl, git, python3, pip, openssh-server, neovim"
+          warn "Please manually install: curl, git, compiler tools, python3, pip, openssh-server"
           ;;
       esac
       ;;
@@ -112,26 +110,45 @@ install_packages() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       fi
       brew update
-      brew install curl git python3 neovim
+      brew install curl git python3 openssh neovim
       ;;
     windows)
       warn "On Windows, please install Git, Python, OpenSSH Server, and Neovim manually."
       ;;
   esac
-  log "Essential packages are installed"
+  log "Essential packages installed"
 }
 
-# ─── Ensure Neovim ≥ 0.9 (Ubuntu/Debian) ───────────────────────────────────────
+# ─── Add unstable PPA & install/up‑date Neovim ≥ 0.9 ───────────────────────────
+install_neovim() {
+  step "Installing/upgrading Neovim via ppa:neovim-ppa/unstable"
+  if [[ "$OS_TYPE" = "linux" && ( "$DISTRO" = "ubuntu" || "$DISTRO" = "debian" ) ]]; then
+    sudo apt-get update -qq
+    sudo apt-get install -y software-properties-common
+    sudo add-apt-repository -y ppa:neovim-ppa/unstable
+    sudo apt-get update -qq
+    sudo apt-get install -y neovim
+    log "Neovim now at $(nvim --version | head -n1 | awk '{print $2}')"
+  else
+    warn "Automatic Neovim upgrade only implemented for Debian/Ubuntu"
+  fi
+}
+
+# ─── Ensure Neovim ≥ 0.9.0 ─────────────────────────────────────────────────────
 ensure_neovim() {
+  step "Ensuring Neovim ≥ 0.9.0"
   if command -v nvim &>/dev/null; then
-    local ver
-    ver=$(nvim --version | head -n1 | awk '{print $2}')
+    raw_ver=$(nvim --version | head -n1 | awk '{print $2}')
+    ver=${raw_ver#v}  # strip leading 'v'
     if dpkg --compare-versions "$ver" lt "0.9.0"; then
-      log "Upgrading Neovim from $ver → latest"
-      sudo apt-get install -y neovim
+      log "Detected Neovim $ver < 0.9.0 → upgrading"
+      install_neovim
     else
-      debug "Neovim version $ver is sufficient"
+      debug "Neovim $ver is OK"
     fi
+  else
+    log "Neovim not found → installing"
+    install_neovim
   fi
 }
 
@@ -153,7 +170,7 @@ setup_ssh_keys() {
     ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N ""
   fi
 
-  # Populate ~/.ssh/config
+  # Write ~/.ssh/config
   {
     echo "Host github.com"
     echo "  User git"
@@ -166,7 +183,7 @@ setup_ssh_keys() {
   } >> "$HOME/.ssh/config"
 
   chmod 600 "$HOME/.ssh/config"
-  log "SSH keys and config are set"
+  log "SSH keys and config ready"
 }
 
 # ─── Clone/Update Dotfiles & Run Installer ────────────────────────────────────
@@ -189,14 +206,13 @@ setup_dotfiles() {
 # ─── Enable SSH Server (incoming) ─────────────────────────────────────────────
 enable_sshd() {
   step "Enabling SSH server"
-  if [[ "$OS_TYPE" == "linux" ]]; then
+  if [[ "$OS_TYPE" = "linux" ]]; then
     case "$DISTRO" in
       ubuntu|debian) sudo systemctl enable --now ssh ;;
-      fedora|centos|rhel) sudo systemctl enable --now sshd ;;
-      arch) sudo systemctl enable --now sshd ;;
+      fedora|centos|rhel|arch) sudo systemctl enable --now sshd ;;
     esac
-    log "SSH server is active"
-  elif [[ "$OS_TYPE" == "macos" ]]; then
+    log "SSH server active"
+  elif [[ "$OS_TYPE" = "macos" ]]; then
     sudo systemsetup -setremotelogin on
     log "Remote Login (SSH) enabled"
   fi
@@ -208,10 +224,9 @@ configure_dns_search() {
   step "Configuring DNS search domain: $SEARCH_DOMAIN"
 
   if command -v resolvectl &>/dev/null && systemctl is-active --quiet systemd-resolved; then
-    local ifc
-    ifc=$(ip -o -4 route show to default | awk '{print $5}' | head -1)
-    sudo resolvectl domain "$ifc" "$SEARCH_DOMAIN"
-    log "systemd-resolved domain set on $ifc"
+    iface=$(ip -o -4 route show to default | awk '{print $5}' | head -1)
+    sudo resolvectl domain "$iface" "$SEARCH_DOMAIN"
+    log "systemd-resolved domain set on $iface"
   else
     sudo cp /etc/resolv.conf /etc/resolv.conf.bak
     if grep -q "^search" /etc/resolv.conf; then
@@ -236,7 +251,7 @@ main() {
   log "Bootstrap complete! 🎉"
   log "Next steps:"
   log "- Add ~/.ssh/github_ed25519.pub to your GitHub account"
-  log "- Reopen your shell so neovim ≥0.9 is on your PATH"
+  log "- Reopen your shell so Neovim ≥0.9 is on your PATH"
 }
 
 main
