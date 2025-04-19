@@ -135,8 +135,8 @@ ensure_neovim() {
   step "Ensuring Neovim ≥ 0.9.0"
   if command -v nvim &>/dev/null; then
     raw_ver=$(nvim --version | head -n1 | awk '{print $2}')
-    ver=${raw_ver#v}   # strip leading 'v'
-    # ONLY this dpkg call is inside an if, so its non-zero won't kill the script
+    # Strip 'v' prefix and '-dev' suffix, keep only the version numbers
+    ver=$(echo "$raw_ver" | sed 's/^v//' | sed 's/-dev$//')
     if dpkg --compare-versions "$ver" lt "0.9.0"; then
       log "Detected Neovim $ver < 0.9.0 → upgrading"
       install_neovim
