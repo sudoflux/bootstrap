@@ -135,13 +135,19 @@ ensure_neovim() {
   step "Ensuring Neovim ≥ 0.9.0"
   if command -v nvim &>/dev/null; then
     raw_ver=$(nvim --version | head -n1 | awk '{print $2}')
-    # Strip 'v' prefix and '-dev' suffix, keep only the version numbers
-    ver=$(echo "$raw_ver" | sed 's/^v//' | sed 's/-dev$//')
-    if dpkg --compare-versions "$ver" lt "0.9.0"; then
-      log "Detected Neovim $ver < 0.9.0 → upgrading"
-      install_neovim
+    # Extract major and minor version numbers only
+    major_ver=$(echo "$raw_ver" | sed 's/^v//' | cut -d. -f1)
+    minor_ver=$(echo "$raw_ver" | sed 's/^v//' | cut -d. -f2)
+    
+    echo "DEBUG: raw_ver=$raw_ver"
+    echo "DEBUG: major_ver=$major_ver"
+    echo "DEBUG: minor_ver=$minor_ver"
+    
+    if [ "$major_ver" -gt 0 ] || [ "$minor_ver" -ge 9 ]; then
+      debug "Neovim $raw_ver is already ≥ 0.9.0"
     else
-      debug "Neovim $ver is already ≥ 0.9.0"
+      log "Detected Neovim $raw_ver < 0.9.0 → upgrading"
+      install_neovim
     fi
   else
     log "Neovim not found → installing"
