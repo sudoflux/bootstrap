@@ -191,8 +191,10 @@ setup_dotfiles() {
   step "Cloning/updating dotfiles"
   if [[ -d "$HOME/dotfiles/.git" ]]; then
     cd "$HOME/dotfiles"
-    git fetch --all
-    git reset --hard origin/main
+    git fetch --all --prune
+
+    # reset to whatever branch origin/HEAD points to
+    git reset --hard origin/HEAD
   else
     rm -rf "$HOME/dotfiles"
     git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
@@ -202,6 +204,7 @@ setup_dotfiles() {
   chmod +x "$HOME/dotfiles/install_dotfiles.sh"
   "$HOME/dotfiles/install_dotfiles.sh"
 }
+
 
 # ─── Enable SSH Server (incoming) ─────────────────────────────────────────────
 enable_sshd() {
