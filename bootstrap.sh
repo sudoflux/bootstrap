@@ -167,7 +167,7 @@ install_packages() {
     if [ "$OS_TYPE" == "linux" ]; then
         if [ "$DISTRO" == "ubuntu" ] || [ "$DISTRO" == "debian" ]; then
             # Define essential packages
-            local essential_packages=("curl" "git" "build-essential" "python3" "python3-pip" "openssh-server")
+            local essential_packages=("curl" "git" "build-essential" "python3" "python3-pip" "openssh-server" "neovim")
             local missing_packages=()
             
             # Check for missing packages
@@ -200,7 +200,7 @@ install_packages() {
             fi
         elif [ "$DISTRO" == "fedora" ] || [ "$DISTRO" == "rhel" ] || [ "$DISTRO" == "centos" ]; then
             # Define essential packages
-            local essential_packages=("curl" "git" "gcc" "gcc-c++" "make" "python3" "python3-pip" "openssh-server")
+            local essential_packages=("curl" "git" "gcc" "gcc-c++" "make" "python3" "python3-pip" "openssh-server" "neovim")
             local missing_packages=()
             
             # Check for missing packages
@@ -233,7 +233,7 @@ install_packages() {
             fi
         elif [ "$DISTRO" == "arch" ]; then
             # Define essential packages
-            local essential_packages=("curl" "git" "base-devel" "python" "python-pip" "openssh")
+            local essential_packages=("curl" "git" "base-devel" "python" "python-pip" "openssh" "neovim")
             local missing_packages=()
             
             # Check for missing packages
