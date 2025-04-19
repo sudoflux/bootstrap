@@ -88,16 +88,16 @@ install_packages() {
           sudo apt-get update -qq
           sudo apt-get install -y \
             curl git build-essential python3 python3-pip \
-            openssh-server
+            openssh-server unzip
           ;;
         fedora|centos|rhel)
           sudo dnf install -y \
             curl git gcc gcc-c++ make python3 python3-pip \
-            openssh-server
+            openssh-server unzip
           ;;
         arch)
           sudo pacman -Sy --noconfirm \
-            curl git base-devel python python-pip openssh
+            curl git base-devel python python-pip openssh unzip
           ;;
         *)
           warn "Please manually install: curl, git, compiler tools, python3, pip, openssh-server"
