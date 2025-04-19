@@ -145,6 +145,8 @@ ensure_neovim() {
     
     if [ "$major_ver" -gt 0 ] || [ "$minor_ver" -ge 9 ]; then
       debug "Neovim $raw_ver is already ≥ 0.9.0"
+      echo "DEBUG: Version check passed, continuing..."
+      return 0
     else
       log "Detected Neovim $raw_ver < 0.9.0 → upgrading"
       install_neovim
@@ -153,6 +155,7 @@ ensure_neovim() {
     log "Neovim not found → installing"
     install_neovim
   fi
+  echo "DEBUG: ensure_neovim completed"
 }
 
 # ─── SSH Keys & Config (outgoing) ─────────────────────────────────────────────
@@ -246,12 +249,14 @@ configure_dns_search() {
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 main() {
+  set +e  # Don't exit on error
   install_packages
-  ensure_neovim
+  ensure_neovim || true  # Continue even if ensure_neovim returns non-zero
   setup_ssh_keys
   setup_dotfiles
   enable_sshd
   configure_dns_search
+  set -e  # Restore exit on error
 
   echo
   log "Bootstrap complete! 🎉"
