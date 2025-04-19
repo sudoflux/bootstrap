@@ -122,6 +122,20 @@ parse_args() {
   done
 }
 
+# After install_packages logic (Ubuntu/Debian section)
+# Check if Neovim version is old and install latest AppImage if needed
+if command -v nvim &>/dev/null; then
+  CURRENT_NVIM_VERSION=$(nvim --version | head -n 1 | awk '{print $2}')
+  REQUIRED_NVIM_VERSION="0.9.0"
+  if dpkg --compare-versions "$CURRENT_NVIM_VERSION" lt "$REQUIRED_NVIM_VERSION"; then
+    log_info "Detected Neovim version $CURRENT_NVIM_VERSION — too old, installing latest..."
+    install_latest_nvim_appimage
+  fi
+else
+  log_info "Neovim not found — installing latest version"
+  install_latest_nvim_appimage
+fi
+
 # Detect OS
 detect_os() {
   log_step "Detecting operating system"
