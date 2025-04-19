@@ -119,32 +119,29 @@ install_packages() {
   log "Essential packages installed"
 }
 
-# ─── Add unstable PPA & install/up‑date Neovim ≥ 0.9 ───────────────────────────
+# ─── install_neovim ──────────────────────────────────────────────────────────
 install_neovim() {
   step "Installing/upgrading Neovim via ppa:neovim-ppa/unstable"
-  if [[ "$OS_TYPE" = "linux" && ( "$DISTRO" = "ubuntu" || "$DISTRO" = "debian" ) ]]; then
-    sudo apt-get update -qq
-    sudo apt-get install -y software-properties-common
-    sudo add-apt-repository -y ppa:neovim-ppa/unstable
-    sudo apt-get update -qq
-    sudo apt-get install -y neovim
-    log "Neovim now at $(nvim --version | head -n1 | awk '{print $2}')"
-  else
-    warn "Automatic Neovim upgrade only implemented for Debian/Ubuntu"
-  fi
+  sudo apt-get update -qq
+  sudo apt-get install -y software-properties-common
+  sudo add-apt-repository -y ppa:neovim-ppa/unstable
+  sudo apt-get update -qq
+  sudo apt-get install -y neovim
+  log "Neovim now at $(nvim --version | head -n1 | awk '{print $2}')"
 }
 
-# ─── Ensure Neovim ≥ 0.9.0 ─────────────────────────────────────────────────────
+# ─── ensure_neovim ────────────────────────────────────────────────────────────
 ensure_neovim() {
   step "Ensuring Neovim ≥ 0.9.0"
   if command -v nvim &>/dev/null; then
     raw_ver=$(nvim --version | head -n1 | awk '{print $2}')
-    ver=${raw_ver#v}  # strip leading 'v'
+    ver=${raw_ver#v}   # strip leading 'v'
+    # ONLY this dpkg call is inside an if, so its non-zero won't kill the script
     if dpkg --compare-versions "$ver" lt "0.9.0"; then
       log "Detected Neovim $ver < 0.9.0 → upgrading"
       install_neovim
     else
-      debug "Neovim $ver is OK"
+      debug "Neovim $ver is already ≥ 0.9.0"
     fi
   else
     log "Neovim not found → installing"
