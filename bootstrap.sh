@@ -76,6 +76,12 @@ detect_os() {
     error "Unsupported OS"
   fi
 }
+
+# Add WSL detection
+is_wsl() {
+  grep -qi microsoft /proc/version 2>/dev/null
+}
+
 detect_os
 
 # ─── Install essential packages (excl. Neovim) ─────────────────────────────────
@@ -215,6 +221,10 @@ setup_dotfiles() {
 # ─── Enable SSH Server (incoming) ─────────────────────────────────────────────
 enable_sshd() {
   step "Enabling SSH server"
+  if is_wsl; then
+    warn "WSL detected: Skipping SSH server enablement (systemd not available)"
+    return
+  fi
   if [[ "$OS_TYPE" = "linux" ]]; then
     case "$DISTRO" in
       ubuntu|debian) sudo systemctl enable --now ssh ;;
