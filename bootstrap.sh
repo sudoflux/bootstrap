@@ -98,26 +98,26 @@ install_packages() {
           sudo apt-get update -qq
           sudo apt-get install -y \
             curl git build-essential python3 python3-pip \
-            openssh-server unzip
+            openssh-server unzip ripgrep
           ;;
         fedora|centos|rhel)
           # Try dnf, fallback to yum for older systems
           if command -v dnf &>/dev/null; then
             sudo dnf install -y \
               curl git gcc gcc-c++ make python3 python3-pip \
-              openssh-server unzip
+              openssh-server unzip ripgrep
           else
             sudo yum install -y \
               curl git gcc gcc-c++ make python3 python3-pip \
-              openssh-server unzip
+              openssh-server unzip ripgrep
           fi
           ;;
         arch)
           sudo pacman -Sy --noconfirm \
-            curl git base-devel python python-pip openssh unzip
+            curl git base-devel python python-pip openssh unzip ripgrep
           ;;
         *)
-          warn "Please manually install: curl, git, compiler tools, python3, pip, openssh-server"
+          warn "Please manually install: curl, git, compiler tools, python3, pip, openssh-server, ripgrep"
           ;;
       esac
       ;;
@@ -127,10 +127,10 @@ install_packages() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       fi
       brew update
-      brew install curl git python3 openssh neovim node
+      brew install curl git python3 openssh neovim node ripgrep
       ;;
     windows)
-      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, and Neovim manually."
+      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, Neovim, and ripgrep manually."
       ;;
   esac
   log "Essential packages installed"
