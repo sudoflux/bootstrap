@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # System Bootstrap Script
-#  - Installs essential tools (curl, git, build tools, python3, pip, openssh-server)
+#  - Installs essential tools (curl, git, build tools, python3, pip, openssh-server, node.js)
 #  - Ensures Neovim ≥ 0.9 via the neovim-ppa/unstable channel
+#  - Ensures Node.js (latest LTS)
 #  - Sets up SSH keys & config for outgoing
 #  - Clones/updates your dotfiles & runs install_dotfiles.sh
 #  - Enables SSH server for incoming
@@ -84,7 +85,7 @@ is_wsl() {
 
 detect_os
 
-# ─── Install essential packages (excl. Neovim) ─────────────────────────────────
+# ─── Install essential packages (excl. Neovim & Node.js) ──────────────────────
 install_packages() {
   step "Installing essential packages"
   case "$OS_TYPE" in
@@ -116,13 +117,42 @@ install_packages() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       fi
       brew update
-      brew install curl git python3 openssh neovim
+      brew install curl git python3 openssh neovim node
       ;;
     windows)
-      warn "On Windows, please install Git, Python, OpenSSH Server, and Neovim manually."
+      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, and Neovim manually."
       ;;
   esac
   log "Essential packages installed"
+}
+
+# ─── Ensure Node.js (latest LTS) ──────────────────────────────────────────────
+ensure_node() {
+  step "Ensuring Node.js (latest LTS)"
+  if [[ "$OS_TYPE" = "linux" ]]; then
+    # Check if node is installed and version is current LTS
+    if command -v node &>/dev/null; then
+      CURRENT_NODE=$(node --version | sed 's/^v//')
+      log "Node.js currently installed: v$CURRENT_NODE"
+    else
+      log "Node.js not found, installing latest LTS"
+      # NodeSource setup for latest LTS
+      curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+      sudo apt-get install -y nodejs
+      return
+    fi
+    # Always update to latest LTS
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    log "Node.js updated to: $(node --version)"
+  elif [[ "$OS_TYPE" = "macos" ]]; then
+    if ! brew list node &>/dev/null; then
+      brew install node
+    else
+      brew upgrade node
+    fi
+    log "Node.js version: $(node --version)"
+  fi
 }
 
 # ─── install_neovim ──────────────────────────────────────────────────────────
@@ -261,6 +291,7 @@ configure_dns_search() {
 main() {
   set +e  # Don't exit on error
   install_packages
+  ensure_node
   ensure_neovim || true  # Continue even if ensure_neovim returns non-zero
   setup_ssh_keys
   setup_dotfiles
