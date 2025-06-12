@@ -288,10 +288,24 @@ setup_ssh_keys() {
     if ! $DRY_RUN; then
       if [[ -n "${SUDO_USER:-}" ]]; then
         sudo -u "$ACTUAL_USER" ssh-keygen -t ed25519 -C "$ACTUAL_USER@$(hostname)" -f "$ssh_dir/github_ed25519" -N ""
-        echo "Add to GitHub:" && cat "$ssh_dir/github_ed25519.pub"
+        echo ""
+        echo "================== IMPORTANT =================="
+        echo "Add this SSH key to your GitHub account:"
+        echo "https://github.com/settings/keys"
+        echo ""
+        cat "$ssh_dir/github_ed25519.pub"
+        echo "==============================================="
+        echo ""
       else
         ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f "$ssh_dir/github_ed25519" -N ""
-        echo "Add to GitHub:" && cat "$ssh_dir/github_ed25519.pub"
+        echo ""
+        echo "================== IMPORTANT =================="
+        echo "Add this SSH key to your GitHub account:"
+        echo "https://github.com/settings/keys"
+        echo ""
+        cat "$ssh_dir/github_ed25519.pub"
+        echo "==============================================="
+        echo ""
       fi
     else
       log "[DRY RUN] Would generate GitHub SSH key"
@@ -364,6 +378,12 @@ setup_dotfiles() {
   if [[ -d "$dotfiles_dir/.git" ]]; then
     if ! $DRY_RUN; then
       cd "$dotfiles_dir"
+      # Ensure we're using HTTPS for updates during bootstrap
+      current_url=$(git remote get-url origin)
+      if [[ "$current_url" =~ ^git@ ]]; then
+        log "Switching dotfiles to HTTPS for bootstrap"
+        git remote set-url origin https://github.com/sudoflux/dotfiles.git
+      fi
       if [[ -n "${SUDO_USER:-}" ]]; then
         sudo -u "$ACTUAL_USER" git fetch --all --prune
         sudo -u "$ACTUAL_USER" git reset --hard origin/HEAD
