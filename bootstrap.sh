@@ -376,41 +376,23 @@ setup_dotfiles() {
   local dotfiles_dir="$ACTUAL_HOME/dotfiles"
   
   if [[ -d "$dotfiles_dir/.git" ]]; then
+    log "Removing existing dotfiles for clean bootstrap"
     if ! $DRY_RUN; then
-      cd "$dotfiles_dir"
-      # Ensure we're using HTTPS for updates during bootstrap
-      if [[ -n "${SUDO_USER:-}" ]]; then
-        current_url=$(sudo -u "$ACTUAL_USER" git remote get-url origin)
-        if [[ "$current_url" =~ ^git@ ]]; then
-          log "Switching dotfiles to HTTPS for bootstrap"
-          sudo -u "$ACTUAL_USER" git remote set-url origin https://github.com/sudoflux/dotfiles.git
-        fi
-        sudo -u "$ACTUAL_USER" git fetch --all --prune
-        sudo -u "$ACTUAL_USER" git reset --hard origin/HEAD
-      else
-        current_url=$(git remote get-url origin)
-        if [[ "$current_url" =~ ^git@ ]]; then
-          log "Switching dotfiles to HTTPS for bootstrap"
-          git remote set-url origin https://github.com/sudoflux/dotfiles.git
-        fi
-        retry_command "git fetch --all --prune" "Fetching dotfiles updates"
-        git reset --hard origin/HEAD
-      fi
+      rm -rf "$dotfiles_dir"
     else
-      log "[DRY RUN] Would update existing dotfiles"
+      log "[DRY RUN] Would remove existing dotfiles"
+    fi
+  fi
+  
+  # Clone fresh dotfiles
+  if ! $DRY_RUN; then
+    if [[ -n "${SUDO_USER:-}" ]]; then
+      sudo -u "$ACTUAL_USER" git clone https://github.com/sudoflux/dotfiles.git "$dotfiles_dir"
+    else
+      retry_command "git clone https://github.com/sudoflux/dotfiles.git '$dotfiles_dir'" "Cloning dotfiles repository"
     fi
   else
-    if ! $DRY_RUN; then
-      if [[ -n "${SUDO_USER:-}" ]]; then
-        sudo -u "$ACTUAL_USER" rm -rf "$dotfiles_dir"
-        sudo -u "$ACTUAL_USER" git clone https://github.com/sudoflux/dotfiles.git "$dotfiles_dir"
-      else
-        rm -rf "$dotfiles_dir"
-        retry_command "git clone https://github.com/sudoflux/dotfiles.git '$dotfiles_dir'" "Cloning dotfiles repository"
-      fi
-    else
-      log "[DRY RUN] Would clone dotfiles repository"
-    fi
+    log "[DRY RUN] Would clone dotfiles repository"
   fi
 
   step "Running dotfiles installer"
