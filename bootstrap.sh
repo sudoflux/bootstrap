@@ -32,33 +32,43 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC
 log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${GREEN}[INFO]${NC} $1"
     echo -e "$msg"
-    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    if [[ -n "$LOG_FILE" ]]; then
+        echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    fi
 }
 
 warn() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${YELLOW}[WARN]${NC} $1"
     echo -e "$msg"
-    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    if [[ -n "$LOG_FILE" ]]; then
+        echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    fi
 }
 
 error() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${RED}[ERROR]${NC} $1"
     echo -e "$msg" >&2
-    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    if [[ -n "$LOG_FILE" ]]; then
+        echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    fi
     exit 1
 }
 
 step() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${BLUE}[STEP]${NC} $1"
     echo -e "$msg"
-    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    if [[ -n "$LOG_FILE" ]]; then
+        echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    fi
 }
 
 debug() {
     if $VERBOSE; then
         local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $1"
         echo -e "$msg"
-        [[ -n "$LOG_FILE" ]] && echo -e "$msg" >> "$LOG_FILE"
+        if [[ -n "$LOG_FILE" ]]; then
+            echo -e "$msg" >> "$LOG_FILE"
+        fi
     fi
 }
 
@@ -146,7 +156,51 @@ is_wsl() {
   grep -qi microsoft /proc/version 2>/dev/null
 }
 
-detect_os
+# ─── Prerequisites check ──────────────────────────────────────────────────────
+check_prerequisites() {
+  step "Checking prerequisites"
+  
+  # Check internet connectivity
+  if ! curl -s --head --connect-timeout 5 https://github.com > /dev/null 2>&1; then
+    error "No internet connection detected. Please check your network connection."
+  fi
+  log "Internet connectivity verified"
+  
+  # Check disk space (need at least 1GB free)
+  if [[ "$OS_TYPE" != "windows" ]]; then
+    available_space=$(df -BG "$HOME" | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [[ "$available_space" -lt 1 ]]; then
+      error "Insufficient disk space. At least 1GB free space required."
+    fi
+    log "Disk space check passed: ${available_space}GB available"
+  fi
+  
+  # Check if running with appropriate permissions
+  if [[ "$OS_TYPE" = "linux" ]] && [[ ! -w /usr/local/bin ]] && [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+    warn "May need sudo access for package installation"
+  fi
+}
+
+# ─── Retry command helper ─────────────────────────────────────────────────────
+retry_command() {
+  local cmd="$1"
+  local description="$2"
+  local retries=0
+  
+  while (( retries < MAX_RETRIES )); do
+    if eval "$cmd"; then
+      return 0
+    fi
+    
+    retries=$((retries + 1))
+    if (( retries < MAX_RETRIES )); then
+      warn "$description failed. Retrying in $RETRY_DELAY seconds... (attempt $((retries + 1))/$MAX_RETRIES)"
+      sleep "$RETRY_DELAY"
+    else
+      error "$description failed after $MAX_RETRIES attempts"
+    fi
+  done
+}
 
 # ─── Install essential packages (excl. Node.js) ──────────────────────────────
 install_packages() {
@@ -154,6 +208,12 @@ install_packages() {
   if is_wsl; then
     debug "Running under WSL: installing packages as for $DISTRO"
   fi
+  
+  if $DRY_RUN; then
+    log "[DRY RUN] Would install: curl git build-essential python3 python3-pip openssh-server unzip ripgrep"
+    return
+  fi
+  
   case "$OS_TYPE" in
     linux)
       case "$DISTRO" in
@@ -506,6 +566,9 @@ EOF
 main() {
   log "Starting bootstrap process"
   local start_time=$SECONDS
+  
+  # Detect OS first
+  detect_os
   
   # Pre-flight checks
   check_prerequisites
