@@ -332,9 +332,11 @@ Host *
 EOF
 )
       if [[ -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$ACTUAL_USER" touch "$ssh_dir/config"
         echo "$config_content" | sudo -u "$ACTUAL_USER" tee -a "$ssh_dir/config" > /dev/null
         sudo -u "$ACTUAL_USER" chmod 600 "$ssh_dir/config"
       else
+        touch "$ssh_dir/config"
         echo "$config_content" >> "$ssh_dir/config"
         chmod 600 "$ssh_dir/config"
       fi
