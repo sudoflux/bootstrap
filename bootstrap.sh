@@ -110,7 +110,17 @@ fi
 
 # ─── Sudo up front ────────────────────────────────────────────────────────────
 if ! $DRY_RUN; then
-    sudo -v
+    # Check if we already have sudo access or if we're running as root
+    if [[ $EUID -eq 0 ]]; then
+        debug "Running as root"
+    elif ! sudo -n true 2>/dev/null; then
+        # We need sudo but don't have it - check if we can prompt
+        if [[ -t 0 ]]; then
+            sudo -v
+        else
+            error "This script requires sudo access. Please run with sudo or ensure sudo is available."
+        fi
+    fi
 fi
 
 # ─── Detect OS ────────────────────────────────────────────────────────────────
