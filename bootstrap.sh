@@ -379,15 +379,20 @@ setup_dotfiles() {
     if ! $DRY_RUN; then
       cd "$dotfiles_dir"
       # Ensure we're using HTTPS for updates during bootstrap
-      current_url=$(git remote get-url origin)
-      if [[ "$current_url" =~ ^git@ ]]; then
-        log "Switching dotfiles to HTTPS for bootstrap"
-        git remote set-url origin https://github.com/sudoflux/dotfiles.git
-      fi
       if [[ -n "${SUDO_USER:-}" ]]; then
+        current_url=$(sudo -u "$ACTUAL_USER" git remote get-url origin)
+        if [[ "$current_url" =~ ^git@ ]]; then
+          log "Switching dotfiles to HTTPS for bootstrap"
+          sudo -u "$ACTUAL_USER" git remote set-url origin https://github.com/sudoflux/dotfiles.git
+        fi
         sudo -u "$ACTUAL_USER" git fetch --all --prune
         sudo -u "$ACTUAL_USER" git reset --hard origin/HEAD
       else
+        current_url=$(git remote get-url origin)
+        if [[ "$current_url" =~ ^git@ ]]; then
+          log "Switching dotfiles to HTTPS for bootstrap"
+          git remote set-url origin https://github.com/sudoflux/dotfiles.git
+        fi
         retry_command "git fetch --all --prune" "Fetching dotfiles updates"
         git reset --hard origin/HEAD
       fi
