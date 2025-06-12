@@ -320,6 +320,10 @@ setup_ssh_keys() {
   if ! grep -q "Host github.com" "$ssh_dir/config" 2>/dev/null; then
     log "Updating SSH config"
     if ! $DRY_RUN; then
+      # Remove broken symlinks
+      if [[ -L "$ssh_dir/config" && ! -e "$ssh_dir/config" ]]; then
+        rm -f "$ssh_dir/config"
+      fi
       local config_content=$(cat <<EOF
 Host github.com
   User git
