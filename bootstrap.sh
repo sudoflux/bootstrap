@@ -2,7 +2,6 @@
 #
 # System Bootstrap Script
 #  - Installs essential tools (curl, git, build tools, python3, pip, openssh-server, node.js)
-#  - Ensures Neovim ≥ 0.9 via the neovim-ppa/unstable channel
 #  - Ensures Node.js (latest LTS)
 #  - Sets up SSH keys & config for outgoing
 #  - Clones/updates your dotfiles & runs install_dotfiles.sh
@@ -19,20 +18,62 @@ VERBOSE=false
 FORCE=false
 CONFIGURE_SEARCH_DOMAIN=false
 SEARCH_DOMAIN="lab"
+DRY_RUN=false
+SKIP_PACKAGES=false
+SKIP_DOTFILES=false
+LOG_FILE=""
+MAX_RETRIES=3
+RETRY_DELAY=5
 
 # ─── Color Logging ────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-log()    { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn()   { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-step()   { echo -e "${BLUE}[STEP]${NC} $1"; }
-debug()  { $VERBOSE && echo -e "[DEBUG] $1"; }
+
+# Enhanced logging with timestamps and file output
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${GREEN}[INFO]${NC} $1"
+    echo -e "$msg"
+    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+}
+
+warn() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${YELLOW}[WARN]${NC} $1"
+    echo -e "$msg"
+    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+}
+
+error() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${RED}[ERROR]${NC} $1"
+    echo -e "$msg" >&2
+    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+    exit 1
+}
+
+step() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] ${BLUE}[STEP]${NC} $1"
+    echo -e "$msg"
+    [[ -n "$LOG_FILE" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE"
+}
+
+debug() {
+    if $VERBOSE; then
+        local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $1"
+        echo -e "$msg"
+        [[ -n "$LOG_FILE" ]] && echo -e "$msg" >> "$LOG_FILE"
+    fi
+}
 
 # ─── Parse Arguments ──────────────────────────────────────────────────────────
 while (( "$#" )); do
   case "$1" in
     -v|--verbose) VERBOSE=true; shift ;;
     -f|--force)   FORCE=true; shift ;;
+    --dry-run)    DRY_RUN=true; shift ;;
+    --skip-packages) SKIP_PACKAGES=true; shift ;;
+    --skip-dotfiles) SKIP_DOTFILES=true; shift ;;
+    --log-file)
+      LOG_FILE="$2"
+      shift 2
+      ;;
     -d|--domain)
       CONFIGURE_SEARCH_DOMAIN=true
       if [[ -n "${2-}" && "${2:0:1}" != "-" ]]; then
@@ -46,10 +87,14 @@ while (( "$#" )); do
 Usage: $0 [options]
 
 Options:
-  -v, --verbose      Enable verbose logging
-  -f, --force        Force reinstall/update of packages
-  -d, --domain <dom> Configure DNS search domain (default: lab)
-  -h, --help         Show this help
+  -v, --verbose         Enable verbose logging
+  -f, --force          Force reinstall/update of packages
+  --dry-run            Preview changes without applying them
+  --skip-packages      Skip package installation
+  --skip-dotfiles      Skip dotfiles setup
+  --log-file <file>    Save logs to specified file
+  -d, --domain <dom>   Configure DNS search domain (default: lab)
+  -h, --help           Show this help
 EOF
       exit 0
       ;;
@@ -57,8 +102,16 @@ EOF
   esac
 done
 
+# ─── Initialize logging ───────────────────────────────────────────────────────
+if [[ -n "$LOG_FILE" ]]; then
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "=== Bootstrap Started at $(date) ===" > "$LOG_FILE"
+fi
+
 # ─── Sudo up front ────────────────────────────────────────────────────────────
-sudo -v
+if ! $DRY_RUN; then
+    sudo -v
+fi
 
 # ─── Detect OS ────────────────────────────────────────────────────────────────
 detect_os() {
@@ -85,7 +138,7 @@ is_wsl() {
 
 detect_os
 
-# ─── Install essential packages (excl. Neovim & Node.js) ──────────────────────
+# ─── Install essential packages (excl. Node.js) ──────────────────────────────
 install_packages() {
   step "Installing essential packages"
   if is_wsl; then
@@ -127,10 +180,10 @@ install_packages() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       fi
       brew update
-      brew install curl git python3 openssh neovim node ripgrep
+      brew install curl git python3 openssh node ripgrep
       ;;
     windows)
-      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, Neovim, and ripgrep manually."
+      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, and ripgrep manually."
       ;;
   esac
   log "Essential packages installed"
@@ -263,96 +316,97 @@ ensure_node() {
   fi
 }
 
-# ─── install_neovim ──────────────────────────────────────────────────────────
-install_neovim() {
-  step "Installing/upgrading Neovim via ppa:neovim-ppa/unstable"
-  sudo apt-get update -qq
-  sudo apt-get install -y software-properties-common
-  sudo add-apt-repository -y ppa:neovim-ppa/unstable
-  sudo apt-get update -qq
-  sudo apt-get install -y neovim
-  log "Neovim now at $(nvim --version | head -n1 | awk '{print $2}')"
-}
-
-# ─── ensure_neovim ────────────────────────────────────────────────────────────
-ensure_neovim() {
-  step "Ensuring Neovim ≥ 0.9.0"
-  if command -v nvim &>/dev/null; then
-    raw_ver=$(nvim --version | head -n1 | awk '{print $2}')
-    # Extract major and minor version numbers only
-    major_ver=$(echo "$raw_ver" | sed 's/^v//' | cut -d. -f1)
-    minor_ver=$(echo "$raw_ver" | sed 's/^v//' | cut -d. -f2)
-    
-    echo "DEBUG: raw_ver=$raw_ver"
-    echo "DEBUG: major_ver=$major_ver"
-    echo "DEBUG: minor_ver=$minor_ver"
-    
-    if [ "$major_ver" -gt 0 ] || [ "$minor_ver" -ge 9 ]; then
-      debug "Neovim $raw_ver is already ≥ 0.9.0"
-      echo "DEBUG: Version check passed, continuing..."
-      return 0
-    else
-      log "Detected Neovim $raw_ver < 0.9.0 → upgrading"
-      install_neovim
-    fi
-  else
-    log "Neovim not found → installing"
-    install_neovim
-  fi
-  echo "DEBUG: ensure_neovim completed"
-}
 
 # ─── SSH Keys & Config (outgoing) ─────────────────────────────────────────────
 setup_ssh_keys() {
   step "Setting up SSH keys & config"
-  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  
+  if ! $DRY_RUN; then
+    mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  else
+    log "[DRY RUN] Would create ~/.ssh directory"
+  fi
 
   # GitHub key
   if [[ ! -f "$HOME/.ssh/github_ed25519" ]]; then
     log "Generating GitHub SSH key"
-    ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f "$HOME/.ssh/github_ed25519" -N ""
-    echo "Add to GitHub:" && cat "$HOME/.ssh/github_ed25519.pub"
+    if ! $DRY_RUN; then
+      ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f "$HOME/.ssh/github_ed25519" -N ""
+      echo "Add to GitHub:" && cat "$HOME/.ssh/github_ed25519.pub"
+    else
+      log "[DRY RUN] Would generate GitHub SSH key"
+    fi
+  else
+    debug "GitHub SSH key already exists"
   fi
 
   # Default key
   if [[ ! -f "$HOME/.ssh/id_ed25519" ]]; then
     log "Generating default SSH key"
-    ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N ""
+    if ! $DRY_RUN; then
+      ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N ""
+    else
+      log "[DRY RUN] Would generate default SSH key"
+    fi
+  else
+    debug "Default SSH key already exists"
   fi
 
-  # Write ~/.ssh/config
-  {
-    echo "Host github.com"
-    echo "  User git"
-    echo "  IdentityFile ~/.ssh/github_ed25519"
-    echo "  AddKeysToAgent yes"
-    echo ""
-    echo "Host *"
-    echo "  IdentityFile ~/.ssh/id_ed25519"
-    echo "  AddKeysToAgent yes"
-  } >> "$HOME/.ssh/config"
-
-  chmod 600 "$HOME/.ssh/config"
+  # Write ~/.ssh/config if it doesn't have our entries
+  if ! grep -q "Host github.com" "$HOME/.ssh/config" 2>/dev/null; then
+    log "Updating SSH config"
+    if ! $DRY_RUN; then
+      {
+        echo "Host github.com"
+        echo "  User git"
+        echo "  IdentityFile ~/.ssh/github_ed25519"
+        echo "  AddKeysToAgent yes"
+        echo ""
+        echo "Host *"
+        echo "  IdentityFile ~/.ssh/id_ed25519"
+        echo "  AddKeysToAgent yes"
+      } >> "$HOME/.ssh/config"
+      chmod 600 "$HOME/.ssh/config"
+    else
+      log "[DRY RUN] Would update SSH config"
+    fi
+  else
+    debug "SSH config already contains GitHub configuration"
+  fi
+  
   log "SSH keys and config ready"
 }
 
 # ─── Clone/Update Dotfiles & Run Installer ────────────────────────────────────
 setup_dotfiles() {
+  [[ "$SKIP_DOTFILES" == true ]] && { log "Skipping dotfiles setup"; return; }
+  
   step "Cloning/updating dotfiles"
   if [[ -d "$HOME/dotfiles/.git" ]]; then
-    cd "$HOME/dotfiles"
-    git fetch --all --prune
-
-    # reset to whatever branch origin/HEAD points to
-    git reset --hard origin/HEAD
+    if ! $DRY_RUN; then
+      cd "$HOME/dotfiles"
+      retry_command "git fetch --all --prune" "Fetching dotfiles updates"
+      # reset to whatever branch origin/HEAD points to
+      git reset --hard origin/HEAD
+    else
+      log "[DRY RUN] Would update existing dotfiles"
+    fi
   else
-    rm -rf "$HOME/dotfiles"
-    git clone https://github.com/sudoflux/dotfiles.git "$HOME/dotfiles"
+    if ! $DRY_RUN; then
+      rm -rf "$HOME/dotfiles"
+      retry_command "git clone https://github.com/sudoflux/dotfiles.git '$HOME/dotfiles'" "Cloning dotfiles repository"
+    else
+      log "[DRY RUN] Would clone dotfiles repository"
+    fi
   fi
 
   step "Running dotfiles installer"
-  chmod +x "$HOME/dotfiles/install_dotfiles.sh"
-  "$HOME/dotfiles/install_dotfiles.sh"
+  if ! $DRY_RUN && [[ -f "$HOME/dotfiles/install_dotfiles.sh" ]]; then
+    chmod +x "$HOME/dotfiles/install_dotfiles.sh"
+    "$HOME/dotfiles/install_dotfiles.sh"
+  else
+    log "[DRY RUN] Would run dotfiles installer"
+  fi
 }
 
 
@@ -395,23 +449,81 @@ configure_dns_search() {
   fi
 }
 
+# ─── Generate summary report ──────────────────────────────────────────────────
+generate_report() {
+    local report_file="$HOME/.bootstrap-report-$(date +%Y%m%d_%H%M%S).txt"
+    
+    if ! $DRY_RUN; then
+        cat > "$report_file" <<EOF
+Bootstrap Summary Report
+========================
+Date: $(date)
+Hostname: $(hostname)
+User: $(whoami)
+OS: $OS_TYPE ($DISTRO)
+
+Actions Performed:
+------------------
+EOF
+    
+        [[ "$SKIP_PACKAGES" != true ]] && echo "✓ Installed/updated system packages" >> "$report_file"
+        [[ -f "$HOME/.ssh/github_ed25519" ]] && echo "✓ Generated SSH keys" >> "$report_file"
+        [[ -d "$HOME/dotfiles" ]] && echo "✓ Set up dotfiles" >> "$report_file"
+        [[ "$CONFIGURE_SEARCH_DOMAIN" == true ]] && echo "✓ Configured DNS search domain: $SEARCH_DOMAIN" >> "$report_file"
+        
+        cat >> "$report_file" <<EOF
+
+SSH Keys:
+---------
+GitHub: ~/.ssh/github_ed25519
+Default: ~/.ssh/id_ed25519
+
+Next Steps:
+-----------
+1. Add GitHub SSH key to your account: https://github.com/settings/keys
+2. Run hosts_manager.sh to set up host synchronization
+3. Review the log file: ${LOG_FILE:-"No log file specified"}
+
+EOF
+        
+        log "Summary report saved to: $report_file"
+        echo
+        cat "$report_file"
+    fi
+}
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 main() {
-  set +e  # Don't exit on error
+  log "Starting bootstrap process"
+  local start_time=$SECONDS
+  
+  # Pre-flight checks
+  check_prerequisites
+  
+  # Main installation steps
   install_packages
   ensure_node
-  ensure_neovim || true  # Continue even if ensure_neovim returns non-zero
   setup_ssh_keys
   setup_dotfiles
   enable_sshd
   configure_dns_search
-  set -e  # Restore exit on error
+  
+  # Generate final report
+  generate_report
 
   echo
   log "Bootstrap complete! 🎉"
-  log "Next steps:"
-  log "- Add ~/.ssh/github_ed25519.pub to your GitHub account"
-  log "- Reopen your shell so Neovim ≥0.9 is on your PATH"
+  
+  # Show quick stats
+  local duration=$((SECONDS - start_time))
+  log "Total time: $((duration / 60))m $((duration % 60))s"
+  [[ -n "$LOG_FILE" ]] && log "Full log saved to: $LOG_FILE"
+  
+  if $DRY_RUN; then
+    echo
+    warn "This was a DRY RUN - no changes were made"
+    warn "Run without --dry-run to apply changes"
+  fi
 }
 
 main

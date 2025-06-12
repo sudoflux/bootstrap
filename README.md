@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20|%20macOS%20|%20WSL-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -49,12 +49,16 @@ That's it! Your new machine is now fully configured and part of your network.
 
 ## ✨ Features
 
-- **🔄 System Updates**: Installs and updates essential system packages
+- **🔄 System Updates**: Installs and updates essential system packages with automatic retry logic
 - **🔑 SSH Keys**: Generates new SSH keys for GitHub and general use
 - **📁 Dotfiles**: Clones and sets up my personal dotfiles repository
 - **🖥️ SSH Server**: Configures the SSH server for remote access
 - **🌐 Network**: Configures DNS search domains for seamless local networking
 - **🔗 Host Management**: Easy SSH access between machines with the hosts_manager.sh script
+- **📊 Reporting**: Generates detailed summary reports of all actions performed
+- **🧪 Dry Run Mode**: Preview all changes before applying them
+- **📦 Package Skipping**: Skip package installation for faster re-runs
+- **🗒️ Logging**: Optional file logging with timestamps
 
 ## 📋 Bootstrap Script Details
 
@@ -64,8 +68,29 @@ That's it! Your new machine is now fully configured and part of your network.
 |--------|-------------|
 | `-v, --verbose` | Enable verbose output |
 | `-f, --force` | Force update of packages and configurations |
+| `--dry-run` | Preview changes without applying them |
+| `--skip-packages` | Skip package installation (useful for re-runs) |
+| `--skip-dotfiles` | Skip dotfiles setup |
+| `--log-file <file>` | Save logs to specified file |
 | `-d, --domain` | Configure DNS search domain (default: "lab") |
 | `-h, --help` | Show help message |
+
+### Usage Examples
+
+Preview what the script will do without making changes:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- --dry-run
+```
+
+Run with logging and skip packages if re-running:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- --log-file ~/bootstrap.log --skip-packages
+```
+
+Verbose mode with custom domain:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- -v -d mydomain.local
+```
 
 ### DNS Search Domain Configuration
 
