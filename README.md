@@ -2,13 +2,13 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20|%20macOS%20|%20WSL-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 </div>
 
-A comprehensive script to bootstrap new Linux, macOS, and WSL environments with my preferred configuration and tools. Sets up everything from system packages to SSH keys to network configuration in one command.
+A minimal script to bootstrap new Linux, macOS, and WSL environments with essential configuration. Sets up SSH keys, dotfiles, and network configuration without installing unnecessary development tools.
 
 ## 🚀 Quick Start (First Time Setup)
 
@@ -21,11 +21,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/
 ```
 
 This will:
-- Install and update essential system packages
-- Generate SSH keys
+- Install minimal system packages (curl, git, python3, openssh-server)
+- Generate SSH keys for GitHub and general use
 - Clone and set up dotfiles repository
-- Configure SSH server
-- Set up networking
+- Enable SSH server for remote access
+- Optionally configure DNS search domain
 
 ### Step 2: Distribute SSH Keys
 
@@ -49,7 +49,7 @@ That's it! Your new machine is now fully configured and part of your network.
 
 ## ✨ Features
 
-- **🔄 System Updates**: Installs and updates essential system packages with automatic retry logic
+- **🔄 System Updates**: Installs essential system packages (curl, git, python3, openssh-server)
 - **🔑 SSH Keys**: Generates new SSH keys for GitHub and general use
 - **📁 Dotfiles**: Clones and sets up my personal dotfiles repository
 - **🖥️ SSH Server**: Configures the SSH server for remote access
@@ -82,9 +82,14 @@ Preview what the script will do without making changes:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- --dry-run
 ```
 
-Run with logging and skip packages if re-running:
+Run with logging and skip packages (useful for Proxmox or production servers):
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- --log-file ~/bootstrap.log --skip-packages
+```
+
+For production servers where you only want SSH setup and dotfiles:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/sudoflux/bootstrap/main/bootstrap.sh)" -- --skip-packages
 ```
 
 Verbose mode with custom domain:

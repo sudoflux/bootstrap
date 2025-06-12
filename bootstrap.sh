@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# System Bootstrap Script
-#  - Installs essential tools (curl, git, build tools, python3, pip, openssh-server, node.js)
-#  - Ensures Node.js (latest LTS)
-#  - Sets up SSH keys & config for outgoing
+# Minimal System Bootstrap Script
+#  - Installs essential tools (curl, git, python3, openssh-server)
+#  - Sets up SSH keys & config for outgoing connections
 #  - Clones/updates your dotfiles & runs install_dotfiles.sh
-#  - Enables SSH server for incoming
+#  - Enables SSH server for incoming connections
 #  - Optionally configures a DNS search domain
 #
 # Usage: bootstrap.sh [-v|--verbose] [-f|--force] [-d|--domain <name>] [-h|--help]
@@ -24,6 +23,15 @@ SKIP_DOTFILES=false
 LOG_FILE=""
 MAX_RETRIES=3
 RETRY_DELAY=5
+
+# ─── Detect actual user when run with sudo ────────────────────────────────────
+if [[ -n "${SUDO_USER:-}" ]]; then
+    ACTUAL_USER="$SUDO_USER"
+    ACTUAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+else
+    ACTUAL_USER="$USER"
+    ACTUAL_HOME="$HOME"
+fi
 
 # ─── Color Logging ────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -118,8 +126,16 @@ if [[ -n "$LOG_FILE" ]]; then
     echo "=== Bootstrap Started at $(date) ===" > "$LOG_FILE"
 fi
 
+# ─── Warn about root execution ────────────────────────────────────────────────
+if [[ $EUID -eq 0 ]] && [[ -z "${SUDO_USER:-}" ]]; then
+    warn "Running as root user. Dotfiles will be installed for root."
+    warn "Consider running as a regular user or with sudo for user-specific setup."
+elif [[ -n "${SUDO_USER:-}" ]]; then
+    log "Running with sudo. Will install dotfiles for user: $ACTUAL_USER"
+fi
+
 # ─── Sudo up front ────────────────────────────────────────────────────────────
-if ! $DRY_RUN; then
+if ! $DRY_RUN && ! $SKIP_PACKAGES; then
     # Check if we already have sudo access or if we're running as root
     if [[ $EUID -eq 0 ]]; then
         debug "Running as root"
@@ -128,7 +144,7 @@ if ! $DRY_RUN; then
         if [[ -t 0 ]]; then
             sudo -v
         else
-            error "This script requires sudo access. Please run with sudo or ensure sudo is available."
+            error "This script requires sudo access for package installation. Please run with sudo or ensure sudo is available."
         fi
     fi
 fi
@@ -166,18 +182,13 @@ check_prerequisites() {
   fi
   log "Internet connectivity verified"
   
-  # Check disk space (need at least 1GB free)
+  # Check disk space (need at least 500MB free for minimal install)
   if [[ "$OS_TYPE" != "windows" ]]; then
-    available_space=$(df -BG "$HOME" | awk 'NR==2 {print $4}' | sed 's/G//')
-    if [[ "$available_space" -lt 1 ]]; then
-      error "Insufficient disk space. At least 1GB free space required."
+    available_space=$(df -BM "$ACTUAL_HOME" | awk 'NR==2 {print $4}' | sed 's/M//')
+    if [[ "$available_space" -lt 500 ]]; then
+      error "Insufficient disk space. At least 500MB free space required."
     fi
-    log "Disk space check passed: ${available_space}GB available"
-  fi
-  
-  # Check if running with appropriate permissions
-  if [[ "$OS_TYPE" = "linux" ]] && [[ ! -w /usr/local/bin ]] && [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
-    warn "May need sudo access for package installation"
+    log "Disk space check passed: ${available_space}MB available"
   fi
 }
 
@@ -202,15 +213,17 @@ retry_command() {
   done
 }
 
-# ─── Install essential packages (excl. Node.js) ──────────────────────────────
+# ─── Install essential packages ───────────────────────────────────────────────
 install_packages() {
+  [[ "$SKIP_PACKAGES" == true ]] && { log "Skipping package installation"; return; }
+  
   step "Installing essential packages"
   if is_wsl; then
     debug "Running under WSL: installing packages as for $DISTRO"
   fi
   
   if $DRY_RUN; then
-    log "[DRY RUN] Would install: curl git build-essential python3 python3-pip openssh-server unzip ripgrep"
+    log "[DRY RUN] Would install: curl git python3 openssh-server"
     return
   fi
   
@@ -219,28 +232,21 @@ install_packages() {
       case "$DISTRO" in
         ubuntu|debian)
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            curl git build-essential python3 python3-pip \
-            openssh-server unzip ripgrep
+          sudo apt-get install -y curl git python3 openssh-server
           ;;
         fedora|centos|rhel)
           # Try dnf, fallback to yum for older systems
           if command -v dnf &>/dev/null; then
-            sudo dnf install -y \
-              curl git gcc gcc-c++ make python3 python3-pip \
-              openssh-server unzip ripgrep
+            sudo dnf install -y curl git python3 openssh-server
           else
-            sudo yum install -y \
-              curl git gcc gcc-c++ make python3 python3-pip \
-              openssh-server unzip ripgrep
+            sudo yum install -y curl git python3 openssh-server
           fi
           ;;
         arch)
-          sudo pacman -Sy --noconfirm \
-            curl git base-devel python python-pip openssh unzip ripgrep
+          sudo pacman -Sy --noconfirm curl git python openssh
           ;;
         *)
-          warn "Please manually install: curl, git, compiler tools, python3, pip, openssh-server, ripgrep"
+          warn "Please manually install: curl, git, python3, openssh-server"
           ;;
       esac
       ;;
@@ -250,159 +256,43 @@ install_packages() {
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       fi
       brew update
-      brew install curl git python3 openssh node ripgrep
+      brew install curl git python3 openssh
       ;;
     windows)
-      warn "On Windows, please install Git, Python, OpenSSH Server, Node.js, and ripgrep manually."
+      warn "On Windows, please install Git, Python, and OpenSSH Server manually."
       ;;
   esac
   log "Essential packages installed"
 }
 
-# ─── Ensure Node.js (version 20.x) ────────────────────────────────────────────
-ensure_node() {
-  step "Ensuring Node.js (version 20.x)"
-
-  # Check for NVM first
-  NVM_DIR="$HOME/.nvm"
-  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    log "NVM detected. Attempting to install/use Node.js 20 via NVM."
-    # Source nvm script to make nvm command available
-    \. "$NVM_DIR/nvm.sh" --no-use # Load nvm
-
-    # Check current NVM version
-    CURRENT_NVM_NODE=$(nvm current)
-    NODE_MAJOR="" # Initialize NODE_MAJOR
-    if [[ "$CURRENT_NVM_NODE" != "none" ]] && [[ "$CURRENT_NVM_NODE" != "system" ]]; then
-        # Parse version like v18.20.8
-        NODE_MAJOR=$(echo "$CURRENT_NVM_NODE" | sed 's/^v//' | cut -d. -f1)
-    fi
-
-    log "NVM current version: $CURRENT_NVM_NODE"
-
-    # Check if NODE_MAJOR is a number and >= 20
-    if [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] && (( NODE_MAJOR >= 20 )); then
-        log "NVM Node.js version ($CURRENT_NVM_NODE) is sufficient (>= 20)"
-        # Ensure it's the default
-        nvm alias default 20 > /dev/null 2>&1 || nvm alias default system > /dev/null 2>&1 # Try setting default
-        log "Set Node 20.x as default via NVM."
-        return
-    fi
-
-    log "Installing Node.js 20.x via NVM..."
-    nvm install 20 || error "NVM failed to install Node.js 20"
-    log "Setting Node.js 20.x as default via NVM..."
-    nvm alias default 20 || error "NVM failed to set default alias to 20"
-    log "Switching current shell to use Node.js 20.x via NVM..."
-    nvm use default > /dev/null # Use the newly set default
-
-    # Verify
-    hash -r
-    FINAL_NODE_VERSION=$(node --version 2>/dev/null)
-    log "Node.js version after NVM install: ${FINAL_NODE_VERSION:-'command failed'}"
-    FINAL_NODE_MAJOR=$(echo "$FINAL_NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
-     if [[ -z "$FINAL_NODE_MAJOR" ]] || ! [[ "$FINAL_NODE_MAJOR" =~ ^[0-9]+$ ]] || (( FINAL_NODE_MAJOR < 20 )); then
-         warn "NVM Node.js version is still not >= 20 after installation attempt!"
-         warn "You may need to reload your shell profile (e.g., source ~/.bashrc) or restart your terminal."
-     fi
-     return # NVM handled it, skip system install
-  fi
-
-  # --- Fallback to System Installation (NodeSource) if NVM not found ---
-  log "NVM not detected. Proceeding with system-wide Node.js installation via NodeSource."
-
-  if [[ "$OS_TYPE" = "linux" ]]; then
-    # Remove any existing nodejs/npm from apt to avoid conflicts ONLY if NVM wasn't found
-    if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
-      log "Attempting to remove existing Node.js/npm from apt..."
-      sudo apt-get remove -y nodejs npm nodejs-dev || true
-      sudo apt-get autoremove -y || true
-    fi
-
-    # Check system node version (should be none now or irrelevant)
-    NODE_PATH=$(command -v node || echo "not_found")
-    if [[ "$NODE_PATH" != "not_found" && ! "$NODE_PATH" =~ \.nvm ]]; then # Check it's not an NVM path somehow
-      CURRENT_NODE=$(node --version 2>/dev/null | sed 's/^v//')
-      NODE_MAJOR=$(echo "$CURRENT_NODE" | cut -d. -f1)
-      log "System Node.js currently installed: v${CURRENT_NODE:-unknown} at $NODE_PATH"
-      if [[ -n "$NODE_MAJOR" ]] && (( NODE_MAJOR >= 20 )); then
-        log "System Node.js version is sufficient (>= 20)"
-        return
-      fi
-      log "System Node.js version is < 20 or unknown. Attempting upgrade/install."
-    else
-      log "System Node.js not found or is NVM path, installing Node.js 20.x via package manager."
-    fi
-
-    # Use the correct NodeSource script for the distro
-    case "$DISTRO" in
-      ubuntu|debian)
-        log "Setting up NodeSource repository for Node.js 20.x..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        log "Updating package list after adding NodeSource repo..."
-        sudo apt-get update -qq
-        log "Installing Node.js from NodeSource..."
-        sudo apt-get install -y nodejs
-        ;;
-      fedora|centos|rhel)
-        log "Setting up NodeSource repository for Node.js 20.x..."
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-        log "Installing Node.js from NodeSource..."
-        if command -v dnf &>/dev/null; then
-          sudo dnf install -y nodejs
-        else
-          sudo yum install -y nodejs
-        fi
-        ;;
-      *)
-        warn "Automatic Node.js 20.x install not supported for $DISTRO. Please install manually."
-        return # Skip final check if install wasn't attempted
-        ;;
-    esac
-
-    # Force hash table refresh and check final version/path
-    hash -r
-    NODE_PATH_AFTER=$(command -v node || echo "not_found")
-    if [[ "$NODE_PATH_AFTER" != "not_found" ]]; then
-        FINAL_NODE_VERSION=$(node --version 2>/dev/null)
-        log "Node.js path after install: $NODE_PATH_AFTER"
-        log "Node.js version after install: ${FINAL_NODE_VERSION:-'command failed'}"
-        # Final verification
-        FINAL_NODE_MAJOR=$(echo "$FINAL_NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
-        if [[ -n "$FINAL_NODE_MAJOR" ]] && (( FINAL_NODE_MAJOR < 20 )); then
-             warn "Node.js version is still < 20 after installation attempt!"
-        fi
-    else
-        error "Node.js command not found after installation attempt!"
-    fi
-
-  elif [[ "$OS_TYPE" = "macos" ]]; then
-    if ! brew list node &>/dev/null; then
-      brew install node
-    else
-      brew upgrade node
-    fi
-    log "Node.js version: $(node --version)"
-  fi
-}
-
-
 # ─── SSH Keys & Config (outgoing) ─────────────────────────────────────────────
 setup_ssh_keys() {
   step "Setting up SSH keys & config"
   
+  local ssh_dir="$ACTUAL_HOME/.ssh"
+  
   if ! $DRY_RUN; then
-    mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+    if [[ -n "${SUDO_USER:-}" ]]; then
+      sudo -u "$ACTUAL_USER" mkdir -p "$ssh_dir"
+      sudo -u "$ACTUAL_USER" chmod 700 "$ssh_dir"
+    else
+      mkdir -p "$ssh_dir" && chmod 700 "$ssh_dir"
+    fi
   else
     log "[DRY RUN] Would create ~/.ssh directory"
   fi
 
   # GitHub key
-  if [[ ! -f "$HOME/.ssh/github_ed25519" ]]; then
+  if [[ ! -f "$ssh_dir/github_ed25519" ]]; then
     log "Generating GitHub SSH key"
     if ! $DRY_RUN; then
-      ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f "$HOME/.ssh/github_ed25519" -N ""
-      echo "Add to GitHub:" && cat "$HOME/.ssh/github_ed25519.pub"
+      if [[ -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$ACTUAL_USER" ssh-keygen -t ed25519 -C "$ACTUAL_USER@$(hostname)" -f "$ssh_dir/github_ed25519" -N ""
+        echo "Add to GitHub:" && cat "$ssh_dir/github_ed25519.pub"
+      else
+        ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)" -f "$ssh_dir/github_ed25519" -N ""
+        echo "Add to GitHub:" && cat "$ssh_dir/github_ed25519.pub"
+      fi
     else
       log "[DRY RUN] Would generate GitHub SSH key"
     fi
@@ -411,10 +301,14 @@ setup_ssh_keys() {
   fi
 
   # Default key
-  if [[ ! -f "$HOME/.ssh/id_ed25519" ]]; then
+  if [[ ! -f "$ssh_dir/id_ed25519" ]]; then
     log "Generating default SSH key"
     if ! $DRY_RUN; then
-      ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N ""
+      if [[ -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$ACTUAL_USER" ssh-keygen -t ed25519 -f "$ssh_dir/id_ed25519" -N ""
+      else
+        ssh-keygen -t ed25519 -f "$ssh_dir/id_ed25519" -N ""
+      fi
     else
       log "[DRY RUN] Would generate default SSH key"
     fi
@@ -423,20 +317,27 @@ setup_ssh_keys() {
   fi
 
   # Write ~/.ssh/config if it doesn't have our entries
-  if ! grep -q "Host github.com" "$HOME/.ssh/config" 2>/dev/null; then
+  if ! grep -q "Host github.com" "$ssh_dir/config" 2>/dev/null; then
     log "Updating SSH config"
     if ! $DRY_RUN; then
-      {
-        echo "Host github.com"
-        echo "  User git"
-        echo "  IdentityFile ~/.ssh/github_ed25519"
-        echo "  AddKeysToAgent yes"
-        echo ""
-        echo "Host *"
-        echo "  IdentityFile ~/.ssh/id_ed25519"
-        echo "  AddKeysToAgent yes"
-      } >> "$HOME/.ssh/config"
-      chmod 600 "$HOME/.ssh/config"
+      local config_content=$(cat <<EOF
+Host github.com
+  User git
+  IdentityFile ~/.ssh/github_ed25519
+  AddKeysToAgent yes
+
+Host *
+  IdentityFile ~/.ssh/id_ed25519
+  AddKeysToAgent yes
+EOF
+)
+      if [[ -n "${SUDO_USER:-}" ]]; then
+        echo "$config_content" | sudo -u "$ACTUAL_USER" tee -a "$ssh_dir/config" > /dev/null
+        sudo -u "$ACTUAL_USER" chmod 600 "$ssh_dir/config"
+      else
+        echo "$config_content" >> "$ssh_dir/config"
+        chmod 600 "$ssh_dir/config"
+      fi
     else
       log "[DRY RUN] Would update SSH config"
     fi
@@ -452,33 +353,48 @@ setup_dotfiles() {
   [[ "$SKIP_DOTFILES" == true ]] && { log "Skipping dotfiles setup"; return; }
   
   step "Cloning/updating dotfiles"
-  if [[ -d "$HOME/dotfiles/.git" ]]; then
+  local dotfiles_dir="$ACTUAL_HOME/dotfiles"
+  
+  if [[ -d "$dotfiles_dir/.git" ]]; then
     if ! $DRY_RUN; then
-      cd "$HOME/dotfiles"
-      retry_command "git fetch --all --prune" "Fetching dotfiles updates"
-      # reset to whatever branch origin/HEAD points to
-      git reset --hard origin/HEAD
+      cd "$dotfiles_dir"
+      if [[ -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$ACTUAL_USER" git fetch --all --prune
+        sudo -u "$ACTUAL_USER" git reset --hard origin/HEAD
+      else
+        retry_command "git fetch --all --prune" "Fetching dotfiles updates"
+        git reset --hard origin/HEAD
+      fi
     else
       log "[DRY RUN] Would update existing dotfiles"
     fi
   else
     if ! $DRY_RUN; then
-      rm -rf "$HOME/dotfiles"
-      retry_command "git clone https://github.com/sudoflux/dotfiles.git '$HOME/dotfiles'" "Cloning dotfiles repository"
+      if [[ -n "${SUDO_USER:-}" ]]; then
+        sudo -u "$ACTUAL_USER" rm -rf "$dotfiles_dir"
+        sudo -u "$ACTUAL_USER" git clone https://github.com/sudoflux/dotfiles.git "$dotfiles_dir"
+      else
+        rm -rf "$dotfiles_dir"
+        retry_command "git clone https://github.com/sudoflux/dotfiles.git '$dotfiles_dir'" "Cloning dotfiles repository"
+      fi
     else
       log "[DRY RUN] Would clone dotfiles repository"
     fi
   fi
 
   step "Running dotfiles installer"
-  if ! $DRY_RUN && [[ -f "$HOME/dotfiles/install_dotfiles.sh" ]]; then
-    chmod +x "$HOME/dotfiles/install_dotfiles.sh"
-    "$HOME/dotfiles/install_dotfiles.sh"
+  if ! $DRY_RUN && [[ -f "$dotfiles_dir/install_dotfiles.sh" ]]; then
+    if [[ -n "${SUDO_USER:-}" ]]; then
+      sudo -u "$ACTUAL_USER" chmod +x "$dotfiles_dir/install_dotfiles.sh"
+      cd "$dotfiles_dir" && sudo -u "$ACTUAL_USER" "$dotfiles_dir/install_dotfiles.sh"
+    else
+      chmod +x "$dotfiles_dir/install_dotfiles.sh"
+      "$dotfiles_dir/install_dotfiles.sh"
+    fi
   else
     log "[DRY RUN] Would run dotfiles installer"
   fi
 }
-
 
 # ─── Enable SSH Server (incoming) ─────────────────────────────────────────────
 enable_sshd() {
@@ -487,6 +403,12 @@ enable_sshd() {
     warn "WSL detected: Skipping SSH server enablement (systemd not available)"
     return
   fi
+  
+  if $DRY_RUN; then
+    log "[DRY RUN] Would enable SSH server"
+    return
+  fi
+  
   if [[ "$OS_TYPE" = "linux" ]]; then
     case "$DISTRO" in
       ubuntu|debian) sudo systemctl enable --now ssh ;;
@@ -503,6 +425,11 @@ enable_sshd() {
 configure_dns_search() {
   [[ "$CONFIGURE_SEARCH_DOMAIN" == true ]] || return
   step "Configuring DNS search domain: $SEARCH_DOMAIN"
+
+  if $DRY_RUN; then
+    log "[DRY RUN] Would configure DNS search domain: $SEARCH_DOMAIN"
+    return
+  fi
 
   if command -v resolvectl &>/dev/null && systemctl is-active --quiet systemd-resolved; then
     iface=$(ip -o -4 route show to default | awk '{print $5}' | head -1)
@@ -521,7 +448,7 @@ configure_dns_search() {
 
 # ─── Generate summary report ──────────────────────────────────────────────────
 generate_report() {
-    local report_file="$HOME/.bootstrap-report-$(date +%Y%m%d_%H%M%S).txt"
+    local report_file="$ACTUAL_HOME/.bootstrap-report-$(date +%Y%m%d_%H%M%S).txt"
     
     if ! $DRY_RUN; then
         cat > "$report_file" <<EOF
@@ -529,7 +456,8 @@ Bootstrap Summary Report
 ========================
 Date: $(date)
 Hostname: $(hostname)
-User: $(whoami)
+User: $ACTUAL_USER
+Home: $ACTUAL_HOME
 OS: $OS_TYPE ($DISTRO)
 
 Actions Performed:
@@ -537,16 +465,16 @@ Actions Performed:
 EOF
     
         [[ "$SKIP_PACKAGES" != true ]] && echo "✓ Installed/updated system packages" >> "$report_file"
-        [[ -f "$HOME/.ssh/github_ed25519" ]] && echo "✓ Generated SSH keys" >> "$report_file"
-        [[ -d "$HOME/dotfiles" ]] && echo "✓ Set up dotfiles" >> "$report_file"
+        [[ -f "$ACTUAL_HOME/.ssh/github_ed25519" ]] && echo "✓ Generated SSH keys" >> "$report_file"
+        [[ -d "$ACTUAL_HOME/dotfiles" ]] && echo "✓ Set up dotfiles" >> "$report_file"
         [[ "$CONFIGURE_SEARCH_DOMAIN" == true ]] && echo "✓ Configured DNS search domain: $SEARCH_DOMAIN" >> "$report_file"
         
         cat >> "$report_file" <<EOF
 
 SSH Keys:
 ---------
-GitHub: ~/.ssh/github_ed25519
-Default: ~/.ssh/id_ed25519
+GitHub: $ACTUAL_HOME/.ssh/github_ed25519
+Default: $ACTUAL_HOME/.ssh/id_ed25519
 
 Next Steps:
 -----------
@@ -555,6 +483,10 @@ Next Steps:
 3. Review the log file: ${LOG_FILE:-"No log file specified"}
 
 EOF
+        
+        if [[ -n "${SUDO_USER:-}" ]]; then
+            chown "$ACTUAL_USER:$ACTUAL_USER" "$report_file"
+        fi
         
         log "Summary report saved to: $report_file"
         echo
@@ -575,7 +507,6 @@ main() {
   
   # Main installation steps
   install_packages
-  ensure_node
   setup_ssh_keys
   setup_dotfiles
   enable_sshd
